@@ -21,8 +21,39 @@ let senderName = '';
 const HOSTED = !!(process.env.RENDER || process.env.HOSTED);
 let publicUrl = process.env.RENDER_EXTERNAL_URL || process.env.PUBLIC_URL || null;
 
+// ---------- servidores ICE (STUN + ponte TURN) ----------
+// Com a ponte TURN o vídeo passa mesmo quando a conexão direta é bloqueada (4G, roteadores).
+// Cloudflare: defina CF_TURN_KEY_ID e CF_TURN_API_TOKEN (painel da Cloudflare > Realtime > TURN).
+// Outro provedor: TURN_URLS (separadas por vírgula), TURN_USERNAME e TURN_CREDENTIAL.
+const STUN = { urls: ['stun:stun.cloudflare.com:3478', 'stun:stun.l.google.com:19302'] };
+let iceCache = null, iceCacheAt = 0;
+async function getIceServers() {
+  if (iceCache && Date.now() - iceCacheAt < 6 * 3600e3) return iceCache;
+  const servers = [STUN];
+  const { CF_TURN_KEY_ID: keyId, CF_TURN_API_TOKEN: token } = process.env;
+  try {
+    if (keyId && token) {
+      const base = `https://rtc.live.cloudflare.com/v1/turn/keys/${encodeURIComponent(keyId)}/credentials`;
+      const opts = { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ ttl: 86400 }) };
+      let r = await fetch(`${base}/generate-ice-servers`, opts);
+      if (r.status === 404) r = await fetch(`${base}/generate`, opts);
+      if (!r.ok) throw new Error(`Cloudflare respondeu ${r.status}`);
+      const j = await r.json();
+      const list = Array.isArray(j.iceServers) ? j.iceServers : [j.iceServers];
+      servers.push(...list.filter((s) => s && s.username));
+    } else if (process.env.TURN_URLS) {
+      servers.push({ urls: process.env.TURN_URLS.split(',').map((s) => s.trim()), username: process.env.TURN_USERNAME, credential: process.env.TURN_CREDENTIAL });
+    }
+  } catch (e) {
+    log('Não consegui pegar a ponte TURN: ' + e.message);
+    return servers; // tenta de novo no próximo pedido
+  }
+  iceCache = servers; iceCacheAt = Date.now();
+  return servers;
+}
+
 // modo reserva: último quadro JPEG enviado pelo transmissor
-let frame = null, frameSeq = 0;
+let frame = null, frameSeq = 0, lastClientFrame = 0;
 let frameWaiters = [];
 
 function send(id, msg) {
@@ -106,7 +137,7 @@ const server = http.createServer(async (req, res) => {
       if (senderId) send(senderId, { type: 'replaced', by: name }); // um apresentador por vez
       senderId = id;
       senderName = name;
-      frame = null;
+      frame = null; lastClientFrame = 0;
       for (const v of viewerIds()) send(senderId, { type: 'viewer-joined', id: v });
       log(`${name} começou a apresentar (${viewerIds().length} espectador(es))`);
     } else {
@@ -162,7 +193,12 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'POST' && url.pathname === '/frame') {
     if (!senderId || req.headers['x-id'] !== senderId) { res.writeHead(403); return res.end(); }
     try {
-      frame = await readBody(req, 5e6);
+      const body = await readBody(req, 5e6);
+      // vários quadros podem estar a caminho ao mesmo tempo: descarta o que chegar atrasado
+      const n = Number(req.headers['x-frame'] || 0);
+      if (n && n <= lastClientFrame) { res.writeHead(204); return res.end(); }
+      lastClientFrame = n;
+      frame = body;
       frameSeq++;
       const waiters = frameWaiters; frameWaiters = [];
       for (const w of waiters) sendFrame(w);
@@ -170,6 +206,13 @@ const server = http.createServer(async (req, res) => {
     } catch {
       res.writeHead(400); return res.end();
     }
+  }
+
+  // configuração de conexão (STUN + ponte TURN com credenciais temporárias)
+  if (req.method === 'GET' && url.pathname === '/ice') {
+    const iceServers = await getIceServers();
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+    return res.end(JSON.stringify({ iceServers, turn: iceServers.length > 1 }));
   }
 
   // espectador pede o próximo quadro (espera até chegar um novo)
