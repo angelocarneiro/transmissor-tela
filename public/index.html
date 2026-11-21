@@ -60,12 +60,26 @@
 </div>
 
 <script>
-const ICE = { iceServers: [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun.cloudflare.com:3478'] }] };
+// configuração de conexão vem do servidor (inclui a ponte TURN, se estiver configurada)
+let icePromise = null, iceAt = 0;
+function getIce() {
+  if (!icePromise || Date.now() - iceAt > 3600e3) {
+    iceAt = Date.now();
+    icePromise = fetch('/ice', { cache: 'no-store' }).then(r => r.json())
+      .then(j => ({ iceServers: j.iceServers
+        // a porta 53 costuma ser bloqueada e só atrasa a conexão
+        .map(s => ({ ...s, urls: [].concat(s.urls).filter(u => !/:53(\?|$)/.test(u)) }))
+        .filter(s => s.urls.length) }))
+      .catch(() => ({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] }));
+  }
+  return icePromise;
+}
+getIce();
 const QUALITY = {
-  leve:   { fps: 15, bitrate: 1500000,  hint: 'detail' },
-  normal: { fps: 30, bitrate: 4000000,  hint: 'detail' },
-  alta:   { fps: 30, bitrate: 8000000,  hint: 'detail' },
-  jogo:   { fps: 60, bitrate: 6000000,  hint: 'motion' },
+  leve:   { fps: 15, bitrate: 1500000, hint: 'detail', pref: 'balanced' },
+  normal: { fps: 30, bitrate: 4000000, hint: 'detail', pref: 'balanced' },
+  alta:   { fps: 30, bitrate: 8000000, hint: 'detail', pref: 'maintain-resolution' },
+  jogo:   { fps: 60, bitrate: 6000000, hint: 'motion', pref: 'maintain-framerate' },
 };
 const $ = (id) => document.getElementById(id);
 const video = $('video'), img = $('img');
@@ -143,7 +157,7 @@ async function onViewerMsg(msg) {
       document.title = live ? `${presenterName} — Transmissor de Tela` : 'Transmissor de Tela';
       updateButtons();
       if (!live) { resetViewer(); status('Ninguém está apresentando agora.', false); }
-      else if (!pc && !relay) { status(`Conectando à tela de ${presenterName}…`); armFallback(12000); }
+      else if (!pc && !relay) { status(`Conectando à tela de ${presenterName}…`); armFallback(15000); }
       break;
     case 'sender-left':
       resetViewer(); status('A apresentação terminou.', false);
@@ -153,7 +167,9 @@ async function onViewerMsg(msg) {
       const { sdp, candidate } = msg.data;
       if (sdp && sdp.type === 'offer') {
         closePc();
-        pc = new RTCPeerConnection(ICE);
+        const cfg = await getIce(); // candidatos que chegarem enquanto isso ficam em "pending"
+        if (relay) return;
+        pc = new RTCPeerConnection(cfg);
         const myPc = pc;
         pc.ontrack = (ev) => {
           if (video.srcObject !== ev.streams[0]) video.srcObject = ev.streams[0];
@@ -166,7 +182,7 @@ async function onViewerMsg(msg) {
           if (pc.connectionState === 'connected') { clearTimeout(fallbackTimer); status(''); showMode(false); }
           if (pc.connectionState === 'failed') startRelay();
         };
-        armFallback(12000);
+        armFallback(15000);
         await pc.setRemoteDescription(sdp);
         for (const c of pending.splice(0)) await pc.addIceCandidate(c).catch(() => {});
         await pc.setLocalDescription(await pc.createAnswer());
@@ -343,7 +359,8 @@ async function onSenderMsg(msg) {
 async function connectPeer(viewerId) {
   if (!stream) return;
   closePeer(viewerId);
-  const p = new RTCPeerConnection(ICE);
+  const p = new RTCPeerConnection(await getIce());
+  if (!stream) return p.close();
   peers.set(viewerId, { pc: p, pending: [] });
   for (const t of stream.getTracks()) p.addTrack(t, stream);
   p.onicecandidate = (e) => e.candidate && post('/signal', { from: sid, to: viewerId, data: { candidate: e.candidate } });
@@ -360,7 +377,7 @@ async function applyBitrate(p) {
     const params = s.getParameters();
     if (!params.encodings?.length) params.encodings = [{}];
     params.encodings[0].maxBitrate = quality.bitrate;
-    params.degradationPreference = quality.hint === 'detail' ? 'maintain-resolution' : 'maintain-framerate';
+    params.degradationPreference = quality.pref;
     await s.setParameters(params).catch(() => {});
   }
 }
@@ -373,11 +390,13 @@ function closePeer(id) {
 // O "relógio" roda num Worker para não ser freado quando a aba fica em segundo plano.
 const canvas = document.createElement('canvas');
 const ctx = canvas.getContext('2d');
-let relayBusy = false, imageCapture = null, captureTrack = null;
-const ticker = new Worker(URL.createObjectURL(new Blob(['setInterval(() => postMessage(0), 125)'])));
+// até 3 quadros a caminho ao mesmo tempo, para não esperar a ida e volta ao servidor a cada foto
+let inFlight = 0, grabbing = false, frameNo = 0, imageCapture = null, captureTrack = null;
+const ticker = new Worker(URL.createObjectURL(new Blob(['setInterval(() => postMessage(0), 83)'])));
 ticker.onmessage = async () => {
-  if (mode !== 'sender' || !stream || !relayCount || relayBusy || !sid) return;
-  relayBusy = true;
+  if (mode !== 'sender' || !stream || !relayCount || grabbing || inFlight >= 3 || !sid) return;
+  grabbing = true;
+  let blob;
   try {
     const vt = stream.getVideoTracks()[0];
     let src;
@@ -393,9 +412,12 @@ ticker.onmessage = async () => {
     canvas.width = Math.round(sw * scale); canvas.height = Math.round(sh * scale);
     ctx.drawImage(src, 0, 0, canvas.width, canvas.height);
     src.close?.();
-    const blob = await new Promise(r => canvas.toBlob(r, 'image/jpeg', 0.6));
-    await fetch('/frame', { method: 'POST', headers: { 'X-Id': sid, 'Content-Type': 'image/jpeg' }, body: blob });
-  } catch {} finally { relayBusy = false; }
+    blob = await new Promise(r => canvas.toBlob(r, 'image/jpeg', 0.65));
+  } catch {} finally { grabbing = false; }
+  if (!blob) return;
+  inFlight++;
+  fetch('/frame', { method: 'POST', headers: { 'X-Id': sid, 'X-Frame': String(++frameNo), 'Content-Type': 'image/jpeg' }, body: blob })
+    .catch(() => {}).finally(() => inFlight--);
 };
 
 // ---------- botões somem sozinhos enquanto assiste ----------
