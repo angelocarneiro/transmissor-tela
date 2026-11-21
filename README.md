@@ -23,7 +23,7 @@ Assim funciona mesmo com o seu PC desligado.
 1. Crie uma conta em https://render.com (grátis) — dá para entrar com a conta do GitHub.
 2. No painel, clique em **New +** → **Blueprint**.
 3. Conecte o GitHub e escolha o repositório `transmissor-tela`.
-4. O Render vai pedir o valor de **SHARE_CODE**: é a **senha para apresentar a tela**. Escolha uma e guarde.
+4. O Render gera sozinho a **senha para apresentar a tela** (variável **SHARE_CODE**). Para ver ou trocar por uma mais fácil: abra o serviço → **Environment** → `SHARE_CODE`.
 5. Clique em **Apply** / **Deploy** e espere uns 2 minutos.
 6. Pronto! O link aparece no topo do serviço, algo como `https://transmissor-tela-xxxx.onrender.com`.
 

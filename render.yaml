@@ -7,5 +7,5 @@ services:
     startCommand: node server.js
     healthCheckPath: /info
     envVars:
-      - key: SHARE_CODE   # senha para apresentar a tela (o Render pede na hora de publicar)
-        sync: false
+      - key: SHARE_CODE   # senha para apresentar a tela (gerada pelo Render; veja/troque em Environment)
+        generateValue: true
