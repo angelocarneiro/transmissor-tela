@@ -6,6 +6,3 @@ services:
     buildCommand: npm install
     startCommand: node server.js
     healthCheckPath: /info
-    envVars:
-      - key: SHARE_CODE   # senha para apresentar a tela (gerada pelo Render; veja/troque em Environment)
-        generateValue: true

@@ -17,15 +17,9 @@ const PUBLIC = path.join(__dirname, 'public');
 const clients = new Map();
 let senderId = null;
 let senderName = '';
-// hospedado na internet (Render define RENDER e RENDER_EXTERNAL_URL): todos usam a senha
+// hospedado na internet (Render define RENDER e RENDER_EXTERNAL_URL)
 const HOSTED = !!(process.env.RENDER || process.env.HOSTED);
 let publicUrl = process.env.RENDER_EXTERNAL_URL || process.env.PUBLIC_URL || null;
-
-// código que outras pessoas precisam para apresentar a tela delas (só aparece no PC do anfitrião)
-const SHARE_CODE = (process.env.SHARE_CODE || '').trim() || String(crypto.randomInt(0, 1e6)).padStart(6, '0');
-const sha = (s) => crypto.createHash('sha256').update(String(s)).digest();
-const codeOk = (c) => crypto.timingSafeEqual(sha(c.trim()), sha(SHARE_CODE));
-const failures = new Map(); // ip -> { count, until } — trava quem erra o código muitas vezes
 
 // modo reserva: último quadro JPEG enviado pelo transmissor
 let frame = null, frameSeq = 0;
@@ -72,16 +66,15 @@ const server = http.createServer(async (req, res) => {
     && !req.headers['x-forwarded-for']
     && /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/.test(req.headers.host || '');
 
-  if (req.method === 'GET' && url.pathname === '/') return serveFile(res, 'index.html', 'text/html; charset=utf-8');
-  if (req.method === 'GET' && url.pathname === '/transmitir') return serveFile(res, 'transmitir.html', 'text/html; charset=utf-8');
-  if (req.method === 'GET' && url.pathname === '/assistir') return serveFile(res, 'assistir.html', 'text/html; charset=utf-8');
+  // uma página só para assistir e compartilhar (os endereços antigos abrem a mesma)
+  if (req.method === 'GET' && ['/', '/assistir', '/transmitir'].includes(url.pathname)) return serveFile(res, 'index.html', 'text/html; charset=utf-8');
   if (req.method === 'GET' && url.pathname === '/style.css') return serveFile(res, 'style.css', 'text/css; charset=utf-8');
 
   if (req.method === 'GET' && url.pathname === '/info') {
     res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
     return res.end(JSON.stringify({
       port: PORT, ips: HOSTED ? [] : localIps(), live: !!senderId, presenter: senderName, internet: INTERNET || HOSTED, publicUrl,
-      isHost: isLocal, shareCode: isLocal ? SHARE_CODE : undefined,
+      isHost: isLocal,
     }));
   }
 
@@ -97,24 +90,11 @@ const server = http.createServer(async (req, res) => {
     });
     res.write(`: ${' '.repeat(2048)}\n\n`); // evita que proxies segurem o fluxo
 
-    // o anfitrião (no próprio PC) sempre pode apresentar; os outros precisam do código
-    if (role === 'sender' && !isLocal) {
-      const ip = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress).split(',')[0].trim();
-      const f = failures.get(ip) || { count: 0, until: 0 };
-      const code = url.searchParams.get('code') || '';
-      let reason = null;
-      if (Date.now() < f.until) reason = 'Muitas tentativas erradas. Espere 1 minuto.';
-      else if (!codeOk(code)) {
-        f.count++;
-        if (f.count >= 5) { f.until = Date.now() + 60000; f.count = 0; }
-        failures.set(ip, f);
-        reason = 'Senha errada. Peça a senha para quem criou a sala.';
-      }
-      if (reason) {
-        res.write(`data: ${JSON.stringify({ type: 'denied', reason })}\n\n`);
-        return res.end();
-      }
-      failures.delete(ip);
+    // um por vez: quem chega espera o atual parar (só o anfitrião, no próprio PC, pode assumir)
+    if (role === 'sender' && senderId && clients.has(senderId) && !isLocal) {
+      const reason = `${senderName} já está apresentando. Espere terminar para compartilhar a sua tela.`;
+      res.write(`data: ${JSON.stringify({ type: 'denied', reason })}\n\n`);
+      return res.end();
     }
 
     res.write(`data: ${JSON.stringify({ type: 'hello', id, role })}\n\n`);
@@ -122,7 +102,7 @@ const server = http.createServer(async (req, res) => {
     clients.set(id, { role, res, relay: false });
 
     if (role === 'sender') {
-      const name = (url.searchParams.get('name') || '').trim().slice(0, 30) || (isLocal ? 'Anfitrião' : 'Convidado');
+      const name = (url.searchParams.get('name') || '').trim().slice(0, 30) || 'Alguém';
       if (senderId) send(senderId, { type: 'replaced', by: name }); // um apresentador por vez
       senderId = id;
       senderName = name;
@@ -239,7 +219,7 @@ function startTunnel() {
     const m = String(d).match(/https:\/\/[a-z0-9.-]+\.lhr\.life/i);
     if (m && m[0] !== publicUrl) {
       publicUrl = m[0];
-      console.log(`\n  >>> LINK PÚBLICO para assistir: ${publicUrl}/assistir\n`);
+      console.log(`\n  >>> LINK PÚBLICO (assistir e compartilhar): ${publicUrl}/\n`);
     }
   };
   tunnel.stdout.on('data', onData);
@@ -265,13 +245,11 @@ server.on('error', (e) => {
 server.listen(PORT, '0.0.0.0', () => {
   if (HOSTED) {
     console.log(`Transmissor de Tela no ar (modo hospedado) na porta ${PORT}. Link: ${publicUrl || '(defina PUBLIC_URL)'}`);
-    if (!process.env.SHARE_CODE) console.log(`ATENÇÃO: SHARE_CODE não definido. Senha temporária para apresentar: ${SHARE_CODE}`);
     return;
   }
   console.log('\n  Transmissor de Tela rodando!\n');
-  console.log(`  Para TRANSMITIR (neste PC):  http://localhost:${PORT}/transmitir`);
-  console.log(`  Código para outras pessoas apresentarem: ${SHARE_CODE}`);
-  for (const ip of localIps()) console.log(`  Para ASSISTIR na mesma rede: http://${ip}:${PORT}/assistir`);
+  console.log(`  Abra neste PC:  http://localhost:${PORT}/`);
+  for (const ip of localIps()) console.log(`  Na mesma rede: http://${ip}:${PORT}/`);
   console.log('\n  Ctrl+C para parar.\n');
   if (INTERNET) startTunnel();
 });
