@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Transmitir Tela</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="wrap">
+  <div class="row" style="justify-content:space-between">
+    <h1>Transmitir tela</h1>
+    <span id="badge" class="badge">Parado</span>
+  </div>
+  <p class="sub">Escolha as opções e clique em <b>Iniciar</b>. O navegador vai perguntar qual tela, janela ou aba compartilhar. Só uma pessoa apresenta por vez: se outra começar, ela assume.</p>
+
+  <div class="card">
+    <div class="row" style="margin-bottom:14px">
+      <label>Seu nome
+        <input type="text" id="name" maxlength="30" placeholder="Como vão te ver">
+      </label>
+      <label id="codeField" class="hide">Senha para apresentar
+        <input type="password" id="code" maxlength="60" placeholder="Senha da sala" autocomplete="off">
+      </label>
+    </div>
+    <div class="row">
+      <label>Fluidez
+        <select id="fps">
+          <option value="15">15 fps (economiza rede)</option>
+          <option value="30" selected>30 fps</option>
+          <option value="60">60 fps (jogos/vídeos)</option>
+        </select>
+      </label>
+      <label>Otimizar para
+        <select id="hint">
+          <option value="detail">Texto e nitidez</option>
+          <option value="motion">Movimento (vídeo/jogo)</option>
+        </select>
+      </label>
+      <label>Qualidade máx.
+        <select id="bitrate">
+          <option value="1500000">Baixa (1,5 Mbps)</option>
+          <option value="4000000" selected>Média (4 Mbps)</option>
+          <option value="10000000">Alta (10 Mbps)</option>
+        </select>
+      </label>
+      <label class="check"><input type="checkbox" id="audio" checked> Transmitir áudio</label>
+    </div>
+    <div class="row" style="margin-top:14px">
+      <button id="start">▶ Iniciar transmissão</button>
+      <button id="stop" class="danger hide">■ Parar</button>
+      <span id="viewers" class="muted"></span>
+    </div>
+    <p id="error" class="muted hide" style="color:var(--live)"></p>
+  </div>
+
+  <div class="card">
+    <div id="publicBox"></div>
+    <div id="lanBox">
+      <div class="muted" style="margin-top:12px">Na mesma rede Wi‑Fi:</div>
+      <div id="links"></div>
+    </div>
+    <div id="codeBox" class="hide" style="margin-top:14px; padding-top:12px; border-top:1px solid var(--line)"></div>
+  </div>
+
+  <div class="card">
+    <div class="muted" style="margin-bottom:8px">Prévia</div>
+    <video id="preview" autoplay muted playsinline></video>
+  </div>
+</div>
+
+<script>
+const ICE = { iceServers: [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun.cloudflare.com:3478'] }] };
+const $ = (id) => document.getElementById(id);
+let myId = null, stream = null, es = null, relayCount = 0;
+const peers = new Map(); // viewerId -> { pc, pending: [] }
+
+// ---------- links de acesso ----------
+function linkRow(url) {
+  return `<div class="row" style="margin-top:6px"><span class="link">${url}</span>
+    <button class="secondary" onclick="navigator.clipboard.writeText('${url}');this.textContent='Copiado!'">Copiar</button></div>`;
+}
+let lastInfo = '', isHost = true;
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+try { $('name').value = localStorage.getItem('nome') || ''; } catch {}
+
+async function refreshInfo() {
+  try {
+    const info = await (await fetch('/info')).json();
+    isHost = info.isHost;
+    $('codeField').classList.toggle('hide', isHost);
+    const key = JSON.stringify(info.publicUrl) + info.ips.join() + isHost;
+    if (key === lastInfo) return;
+    lastInfo = key;
+
+    if (!isHost) {
+      // convidado: mostra só o link para assistir (o mesmo endereço por onde ele entrou)
+      $('lanBox').classList.add('hide');
+      $('publicBox').innerHTML = `<div>Quem vai assistir usa este link:</div>${linkRow(location.origin + '/assistir')}`;
+      return;
+    }
+
+    $('links').innerHTML = info.ips.map(ip => linkRow(`http://${ip}:${info.port}/assistir`)).join('') || '<span class="muted">Nenhuma rede encontrada.</span>';
+    $('codeBox').classList.remove('hide');
+    const base = info.publicUrl || `http://${info.ips[0]}:${info.port}`;
+    $('codeBox').innerHTML = `<div><b>🙋 Outra pessoa quer apresentar a tela dela?</b></div>
+      <div class="muted">Mande este link e a senha abaixo. Ela apresenta pelo navegador do computador dela (Chrome, Edge ou Firefox).</div>
+      ${linkRow(base + '/transmitir')}
+      <div class="row" style="margin-top:8px"><span class="muted">Senha:</span> <span class="link" style="font-size:22px; letter-spacing:3px">${esc(info.shareCode)}</span></div>
+      ${info.publicUrl ? '' : '<div class="muted" style="margin-top:6px">Sem link público, isso só funciona para quem está na mesma rede — e o navegador pode bloquear a captura de tela fora do HTTPS. Use o iniciar.bat.</div>'}`;
+    if (info.publicUrl) {
+      $('publicBox').innerHTML = `<div><b>🌍 Link público</b> — mande para quem vai assistir (funciona de qualquer lugar):</div>${linkRow(info.publicUrl + '/assistir')}
+        <div class="muted" style="margin-top:6px">Qualquer pessoa com este link consegue assistir. O endereço muda quando o programa é reiniciado.</div>`;
+    } else if (info.internet) {
+      $('publicBox').innerHTML = `<div class="muted">🌍 Criando link público… (alguns segundos)</div>`;
+    } else {
+      $('publicBox').innerHTML = `<div class="muted">🌍 Link público desligado. Para pessoas fora da sua rede, abra o programa pelo <b>iniciar.bat</b>.</div>`;
+    }
+  } catch {}
+}
+refreshInfo();
+setInterval(refreshInfo, 3000);
+
+// ---------- sinalização ----------
+let chain = Promise.resolve();
+function signal(to, data) {
+  const body = JSON.stringify({ from: myId, to, data });
+  chain = chain.then(() => fetch('/signal', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body })).catch(() => {});
+}
+
+function showError(msg) { $('error').textContent = msg; $('error').classList.toggle('hide', !msg); }
+
+$('start').onclick = async () => {
+  showError('');
+  const name = $('name').value.trim();
+  const code = $('code').value.trim();
+  if (!isHost && !name) return showError('Digite seu nome.');
+  if (!isHost && !code) return showError('Digite a senha da sala.');
+  try { localStorage.setItem('nome', name); } catch {}
+  if (!navigator.mediaDevices?.getDisplayMedia) {
+    return showError(/Android|iPhone|iPad/i.test(navigator.userAgent)
+      ? 'Celular não consegue compartilhar a tela pelo navegador. Use um computador com Chrome, Edge ou Firefox.'
+      : 'Este navegador não permite capturar a tela aqui. Use o Chrome, Edge ou Firefox e abra pelo link público (https).');
+  }
+  try {
+    stream = await navigator.mediaDevices.getDisplayMedia({
+      video: { frameRate: { ideal: +$('fps').value, max: +$('fps').value }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+      audio: $('audio').checked,
+    });
+  } catch (e) {
+    return showError(e.name === 'NotAllowedError' ? 'Compartilhamento cancelado.' : 'Erro ao capturar a tela: ' + e.message);
+  }
+  const vt = stream.getVideoTracks()[0];
+  vt.contentHint = $('hint').value;
+  vt.onended = stop; // usuário clicou em "Parar de compartilhar" do navegador
+  $('preview').srcObject = stream;
+
+  es = new EventSource('/events?' + new URLSearchParams({ role: 'sender', name, code }));
+  es.onmessage = (e) => handle(JSON.parse(e.data));
+
+  $('start').classList.add('hide'); $('stop').classList.remove('hide');
+  $('badge').textContent = 'AO VIVO'; $('badge').classList.add('live');
+  for (const el of ['fps', 'hint', 'bitrate', 'audio', 'name', 'code']) $(el).disabled = true;
+};
+
+$('stop').onclick = stop;
+
+function stop() {
+  if (es) { es.close(); es = null; }
+  for (const id of [...peers.keys()]) closePeer(id);
+  if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+  relayCount = 0;
+  $('preview').srcObject = null;
+  $('start').classList.remove('hide'); $('stop').classList.add('hide');
+  $('badge').textContent = 'Parado'; $('badge').classList.remove('live');
+  $('viewers').textContent = '';
+  for (const el of ['fps', 'hint', 'bitrate', 'audio', 'name', 'code']) $(el).disabled = false;
+}
+
+async function handle(msg) {
+  switch (msg.type) {
+    case 'denied':
+      stop(); showError(msg.reason);
+      break;
+    case 'hello':
+      myId = msg.id;
+      for (const id of [...peers.keys()]) closePeer(id); // reconexão: recomeça
+      break;
+    case 'viewer-joined': connect(msg.id); break;
+    case 'viewer-left': closePeer(msg.id); break;
+    case 'viewers':
+      relayCount = msg.relay;
+      $('viewers').textContent = (msg.count === 1 ? '1 pessoa assistindo' : `${msg.count} pessoas assistindo`)
+        + (msg.relay ? ` (${msg.relay} no modo reserva)` : '');
+      break;
+    case 'replaced':
+      stop(); showError(`${msg.by} começou a apresentar, então sua transmissão foi encerrada.`);
+      break;
+    case 'signal': {
+      const p = peers.get(msg.from);
+      if (!p) return;
+      const { sdp, candidate } = msg.data;
+      if (sdp) {
+        await p.pc.setRemoteDescription(sdp);
+        for (const c of p.pending.splice(0)) await p.pc.addIceCandidate(c).catch(() => {});
+      } else if (candidate) {
+        if (p.pc.remoteDescription) await p.pc.addIceCandidate(candidate).catch(() => {});
+        else p.pending.push(candidate);
+      }
+      break;
+    }
+  }
+}
+
+async function connect(viewerId) {
+  if (!stream) return;
+  closePeer(viewerId);
+  const pc = new RTCPeerConnection(ICE);
+  peers.set(viewerId, { pc, pending: [] });
+  for (const t of stream.getTracks()) pc.addTrack(t, stream);
+  pc.onicecandidate = (e) => e.candidate && signal(viewerId, { candidate: e.candidate });
+  pc.onconnectionstatechange = () => {
+    if (pc.connectionState === 'connected') applyBitrate(pc);
+    if (pc.connectionState === 'failed') closePeer(viewerId);
+  };
+  await pc.setLocalDescription(await pc.createOffer());
+  signal(viewerId, { sdp: pc.localDescription });
+}
+
+async function applyBitrate(pc) {
+  for (const s of pc.getSenders()) {
+    if (s.track?.kind !== 'video') continue;
+    const params = s.getParameters();
+    if (!params.encodings?.length) params.encodings = [{}];
+    params.encodings[0].maxBitrate = +$('bitrate').value;
+    params.degradationPreference = $('hint').value === 'detail' ? 'maintain-resolution' : 'maintain-framerate';
+    await s.setParameters(params).catch(() => {});
+  }
+}
+
+function closePeer(id) {
+  const p = peers.get(id);
+  if (p) { p.pc.close(); peers.delete(id); }
+}
+
+// ---------- modo reserva: envia imagens JPEG pelo servidor ----------
+// Usado por quem não consegue a conexão direta (redes móveis, firewalls).
+// O "relógio" roda num Worker para não ser freado quando esta aba fica em segundo plano.
+const RELAY_FPS = 8;
+const canvas = document.createElement('canvas');
+const ctx = canvas.getContext('2d');
+let relayBusy = false, imageCapture = null, captureTrack = null;
+const ticker = new Worker(URL.createObjectURL(new Blob([`setInterval(() => postMessage(0), ${Math.round(1000 / RELAY_FPS)})`])));
+ticker.onmessage = async () => {
+  if (!stream || !relayCount || relayBusy) return;
+  relayBusy = true;
+  try {
+    const vt = stream.getVideoTracks()[0];
+    let src;
+    if ('ImageCapture' in window) {
+      if (captureTrack !== vt) { imageCapture = new ImageCapture(vt); captureTrack = vt; }
+      src = await imageCapture.grabFrame();
+    } else {
+      src = $('preview');
+    }
+    const sw = src.width || src.videoWidth, sh = src.height || src.videoHeight;
+    if (!sw) return;
+    const scale = Math.min(1, 1280 / sw);
+    canvas.width = Math.round(sw * scale); canvas.height = Math.round(sh * scale);
+    ctx.drawImage(src, 0, 0, canvas.width, canvas.height);
+    src.close?.();
+    const blob = await new Promise(r => canvas.toBlob(r, 'image/jpeg', 0.6));
+    await fetch('/frame', { method: 'POST', headers: { 'X-Id': myId, 'Content-Type': 'image/jpeg' }, body: blob });
+  } catch {} finally { relayBusy = false; }
+};
+</script>
+</body>
+</html>
