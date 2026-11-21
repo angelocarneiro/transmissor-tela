@@ -30,14 +30,22 @@ let iceCache = null, iceCacheAt = 0;
 async function getIceServers() {
   if (iceCache && Date.now() - iceCacheAt < 6 * 3600e3) return iceCache;
   const servers = [STUN];
-  const { CF_TURN_KEY_ID: keyId, CF_TURN_API_TOKEN: token } = process.env;
+  // remove espaços, quebras de linha e aspas que às vezes vêm junto ao colar
+  const clean = (v) => String(v || '').replace(/[\s"']/g, '');
+  const keyId = clean(process.env.CF_TURN_KEY_ID), token = clean(process.env.CF_TURN_API_TOKEN);
   try {
     if (keyId && token) {
       const base = `https://rtc.live.cloudflare.com/v1/turn/keys/${encodeURIComponent(keyId)}/credentials`;
       const opts = { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ ttl: 86400 }) };
       let r = await fetch(`${base}/generate-ice-servers`, opts);
       if (r.status === 404) r = await fetch(`${base}/generate`, opts);
-      if (!r.ok) throw new Error(`Cloudflare respondeu ${r.status}`);
+      if (!r.ok) {
+        // ajuda a diagnosticar sem expor os códigos: só tamanho e formato
+        const detail = (await r.text().catch(() => '')).slice(0, 200).replace(/\s+/g, ' ');
+        throw new Error(`Cloudflare respondeu ${r.status} (${detail || 'sem detalhe'}). `
+          + `CF_TURN_KEY_ID tem ${keyId.length} caracteres${/^[0-9a-f]+$/i.test(keyId) ? ' (hexadecimal)' : ' (NÃO é hexadecimal)'}, `
+          + `CF_TURN_API_TOKEN tem ${token.length} caracteres.`);
+      }
       const j = await r.json();
       const list = Array.isArray(j.iceServers) ? j.iceServers : [j.iceServers];
       servers.push(...list.filter((s) => s && s.username));
