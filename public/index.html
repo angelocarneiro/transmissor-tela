@@ -6,14 +6,412 @@
 <title>Transmissor de Tela</title>
 <link rel="stylesheet" href="/style.css">
 </head>
-<body>
-<div class="wrap">
-  <h1>Transmissor de Tela</h1>
-  <p class="sub">Compartilhe a tela deste PC com qualquer aparelho na mesma rede Wi‑Fi.</p>
-  <div class="big-links">
-    <a href="/transmitir"><div class="card"><div class="emoji">🖥️</div><h2>Transmitir</h2><p class="muted">Abra neste PC (em localhost) para escolher a tela ou janela.</p></div></a>
-    <a href="/assistir"><div class="card"><div class="emoji">📺</div><h2>Assistir</h2><p class="muted">Abra no celular, TV ou outro PC para ver a transmissão.</p></div></a>
+<body class="viewer">
+<video id="video" autoplay muted playsinline></video>
+<img id="img" class="hide" alt="Tela transmitida">
+
+<div id="overlay" class="overlay">
+  <div class="spinner"></div>
+  <div id="statusText">Conectando…</div>
+  <div class="row" style="margin-top:12px; justify-content:center">
+    <button id="shareBig">🖥️ Compartilhar minha tela</button>
+    <button id="copyBig" class="secondary">🔗 Copiar link da sala</button>
+  </div>
+  <div id="mobileHint" class="muted hide">No celular dá para assistir. Para compartilhar a tela, use um computador.</div>
+</div>
+
+<div id="toast" class="toast hide"></div>
+
+<div id="controls" class="controls hide">
+  <span id="presenter" class="badge live hide"></span>
+  <span id="modeTag" class="badge hide">Modo reserva · sem som</span>
+  <button id="sound" class="secondary hide">🔇 Ativar som</button>
+  <button id="full" class="secondary">⛶ Tela cheia</button>
+  <button id="copy" class="secondary">🔗 Link</button>
+  <button id="share" class="secondary">🖥️ Compartilhar</button>
+  <button id="stop" class="danger hide">■ Parar de compartilhar</button>
+</div>
+
+<!-- janelinha para começar a compartilhar -->
+<div id="panel" class="modal hide">
+  <div class="card" style="width:min(420px, 100%)">
+    <h2 style="margin-top:0">Compartilhar minha tela</h2>
+    <div class="row" style="flex-direction:column; align-items:stretch">
+      <label>Seu nome
+        <input type="text" id="name" maxlength="30" placeholder="Como vão te ver">
+      </label>
+      <label>Qualidade
+        <select id="quality">
+          <option value="leve">Leve (internet fraca)</option>
+          <option value="normal" selected>Normal</option>
+          <option value="alta">Alta (texto bem nítido)</option>
+          <option value="jogo">Jogo / vídeo (60 fps)</option>
+        </select>
+      </label>
+      <label class="check"><input type="checkbox" id="audio" checked> Mandar o som também</label>
+      <div class="muted">Dica: para mandar o som de um vídeo, escolha compartilhar uma <b>aba</b> e marque "compartilhar áudio".</div>
+    </div>
+    <p id="panelError" class="hide" style="color:var(--live)"></p>
+    <div class="row" style="margin-top:14px; justify-content:flex-end">
+      <button id="cancel" class="secondary">Cancelar</button>
+      <button id="go">▶ Começar</button>
+    </div>
   </div>
 </div>
+
+<script>
+const ICE = { iceServers: [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun.cloudflare.com:3478'] }] };
+const QUALITY = {
+  leve:   { fps: 15, bitrate: 1500000,  hint: 'detail' },
+  normal: { fps: 30, bitrate: 4000000,  hint: 'detail' },
+  alta:   { fps: 30, bitrate: 8000000,  hint: 'detail' },
+  jogo:   { fps: 60, bitrate: 6000000,  hint: 'motion' },
+};
+const $ = (id) => document.getElementById(id);
+const video = $('video'), img = $('img');
+const canShare = !!navigator.mediaDevices?.getDisplayMedia;
+let mode = 'viewer';          // 'viewer' ou 'sender'
+let live = false, presenterName = '';
+let roomUrl = location.origin + '/';
+
+// ---------- utilidades ----------
+function status(text, spinning = true) {
+  $('overlay').classList.toggle('hide', !text);
+  $('statusText').textContent = text || '';
+  $('overlay').querySelector('.spinner').classList.toggle('hide', !spinning);
+}
+let toastTimer;
+function toast(msg) {
+  $('toast').textContent = msg; $('toast').classList.remove('hide');
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => $('toast').classList.add('hide'), 6000);
+}
+let chain = Promise.resolve();
+function post(path, data) {
+  const body = JSON.stringify(data);
+  chain = chain.then(() => fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body })).catch(() => {});
+}
+function updateButtons() {
+  const sending = mode === 'sender';
+  $('stop').classList.toggle('hide', !sending);
+  for (const b of [$('share'), $('shareBig')]) {
+    b.classList.toggle('hide', sending || !canShare);
+    b.disabled = live;
+    b.title = live ? `${presenterName} está apresentando. Espere terminar.` : '';
+  }
+  $('mobileHint').classList.toggle('hide', canShare);
+  $('controls').classList.remove('hide');
+  showControls();
+}
+fetch('/info').then(r => r.json()).then(i => { if (i.publicUrl) roomUrl = i.publicUrl + '/'; }).catch(() => {});
+function copyLink() {
+  navigator.clipboard.writeText(roomUrl).then(() => toast('Link copiado: ' + roomUrl), () => toast(roomUrl));
+}
+$('copy').onclick = copyLink;
+$('copyBig').onclick = copyLink;
+
+// =====================================================================
+// ASSISTIR
+// =====================================================================
+let ves = null, vid = null, pc = null, pending = [];
+let relay = false, relaySession = 0, fallbackTimer = null;
+
+function startViewer() {
+  ves = new EventSource('/events?role=viewer');
+  ves.onerror = () => status('Sem conexão com o servidor. Tentando novamente…');
+  ves.onmessage = (e) => onViewerMsg(JSON.parse(e.data));
+}
+function stopViewer() {
+  if (ves) { ves.close(); ves = null; }
+  resetViewer();
+}
+
+function armFallback(ms) {
+  clearTimeout(fallbackTimer);
+  fallbackTimer = setTimeout(() => { if (live && !relay && pc?.connectionState !== 'connected') startRelay(); }, ms);
+}
+
+async function onViewerMsg(msg) {
+  switch (msg.type) {
+    case 'hello':
+      vid = msg.id;
+      if (relay) { relay = false; stopRelay(); }
+      break;
+    case 'status':
+      live = msg.live; presenterName = msg.name || '';
+      $('presenter').textContent = live ? `${presenterName} está apresentando` : '';
+      $('presenter').classList.toggle('hide', !live);
+      document.title = live ? `${presenterName} — Transmissor de Tela` : 'Transmissor de Tela';
+      updateButtons();
+      if (!live) { resetViewer(); status('Ninguém está apresentando agora.', false); }
+      else if (!pc && !relay) { status(`Conectando à tela de ${presenterName}…`); armFallback(12000); }
+      break;
+    case 'sender-left':
+      resetViewer(); status('A apresentação terminou.', false);
+      break;
+    case 'signal': {
+      if (relay) return;
+      const { sdp, candidate } = msg.data;
+      if (sdp && sdp.type === 'offer') {
+        closePc();
+        pc = new RTCPeerConnection(ICE);
+        const myPc = pc;
+        pc.ontrack = (ev) => {
+          if (video.srcObject !== ev.streams[0]) video.srcObject = ev.streams[0];
+          video.play().catch(() => {});
+          $('sound').classList.toggle('hide', !ev.streams[0].getAudioTracks().length);
+        };
+        pc.onicecandidate = (ev) => ev.candidate && post('/signal', { from: vid, to: 'sender', data: { candidate: ev.candidate } });
+        pc.onconnectionstatechange = () => {
+          if (pc !== myPc) return;
+          if (pc.connectionState === 'connected') { clearTimeout(fallbackTimer); status(''); showMode(false); }
+          if (pc.connectionState === 'failed') startRelay();
+        };
+        armFallback(12000);
+        await pc.setRemoteDescription(sdp);
+        for (const c of pending.splice(0)) await pc.addIceCandidate(c).catch(() => {});
+        await pc.setLocalDescription(await pc.createAnswer());
+        post('/signal', { from: vid, to: 'sender', data: { sdp: pc.localDescription } });
+      } else if (candidate) {
+        if (pc && pc.remoteDescription) await pc.addIceCandidate(candidate).catch(() => {});
+        else pending.push(candidate);
+      }
+      break;
+    }
+  }
+}
+
+function closePc() {
+  if (pc) { pc.close(); pc = null; }
+  pending = [];
+  if (mode === 'viewer') video.srcObject = null;
+}
+function resetViewer() {
+  clearTimeout(fallbackTimer);
+  closePc();
+  stopRelay();
+  relay = false;
+  $('modeTag').classList.add('hide');
+  $('sound').classList.add('hide');
+}
+
+// modo reserva: busca imagens pelo servidor quando a conexão direta falha
+async function startRelay() {
+  if (relay) return;
+  relay = true;
+  clearTimeout(fallbackTimer);
+  closePc();
+  post('/relay', { id: vid });
+  status('Conexão direta indisponível. Usando modo reserva…');
+  const session = ++relaySession;
+  let seq = 0, lastUrl = null;
+  while (relay && session === relaySession) {
+    try {
+      const r = await fetch('/frame?after=' + seq, { cache: 'no-store' });
+      if (session !== relaySession) break;
+      if (r.status === 200) {
+        seq = Number(r.headers.get('X-Seq')) || seq + 1;
+        const url = URL.createObjectURL(await r.blob());
+        img.src = url;
+        if (lastUrl) URL.revokeObjectURL(lastUrl);
+        lastUrl = url;
+        if (img.classList.contains('hide')) { status(''); showMode(true); }
+      }
+    } catch {
+      await new Promise(r => setTimeout(r, 1000));
+    }
+  }
+}
+function stopRelay() {
+  relaySession++;
+  img.classList.add('hide');
+  img.removeAttribute('src');
+  video.classList.remove('hide');
+}
+function showMode(isRelay) {
+  img.classList.toggle('hide', !isRelay);
+  video.classList.toggle('hide', isRelay);
+  $('modeTag').classList.toggle('hide', !isRelay);
+  if (isRelay) $('sound').classList.add('hide');
+  showControls();
+}
+
+$('sound').onclick = () => {
+  video.muted = !video.muted;
+  $('sound').textContent = video.muted ? '🔇 Ativar som' : '🔊 Som ligado';
+  video.play().catch(() => {});
+};
+$('full').onclick = () => {
+  if (document.fullscreenElement) document.exitFullscreen();
+  else (document.documentElement.requestFullscreen?.() || video.webkitEnterFullscreen?.());
+};
+
+// =====================================================================
+// COMPARTILHAR
+// =====================================================================
+let ses = null, sid = null, stream = null, relayCount = 0, quality = QUALITY.normal;
+const peers = new Map(); // espectador -> { pc, pending }
+
+try { $('name').value = localStorage.getItem('nome') || ''; } catch {}
+function openPanel() {
+  if (live) return toast(`${presenterName} está apresentando. Espere terminar.`);
+  $('panelError').classList.add('hide');
+  $('panel').classList.remove('hide');
+  $('name').focus();
+}
+$('share').onclick = openPanel;
+$('shareBig').onclick = openPanel;
+$('cancel').onclick = () => $('panel').classList.add('hide');
+function panelError(msg) { $('panelError').textContent = msg; $('panelError').classList.remove('hide'); }
+
+$('go').onclick = async () => {
+  const name = $('name').value.trim();
+  if (!name) return panelError('Digite seu nome.');
+  try { localStorage.setItem('nome', name); } catch {}
+  quality = QUALITY[$('quality').value];
+  try {
+    stream = await navigator.mediaDevices.getDisplayMedia({
+      video: { frameRate: { ideal: quality.fps, max: quality.fps }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+      audio: $('audio').checked,
+    });
+  } catch (e) {
+    return panelError(e.name === 'NotAllowedError' ? 'Compartilhamento cancelado.' : 'Não deu para capturar a tela: ' + e.message);
+  }
+  $('panel').classList.add('hide');
+  const vt = stream.getVideoTracks()[0];
+  vt.contentHint = quality.hint;
+  vt.onended = () => stopSharing(); // botão "Parar de compartilhar" do navegador
+
+  // vira apresentador: sai do modo espectador e mostra a própria tela
+  stopViewer();
+  mode = 'sender';
+  video.srcObject = stream; video.muted = true; video.classList.remove('hide');
+  status('');
+  $('presenter').textContent = 'Você está apresentando';
+  $('presenter').classList.remove('hide');
+  updateButtons();
+
+  ses = new EventSource('/events?' + new URLSearchParams({ role: 'sender', name }));
+  ses.onmessage = (e) => onSenderMsg(JSON.parse(e.data));
+};
+$('stop').onclick = () => stopSharing();
+
+function stopSharing(msg) {
+  if (mode !== 'sender') return;
+  if (ses) { ses.close(); ses = null; }
+  for (const id of [...peers.keys()]) closePeer(id);
+  if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+  relayCount = 0; sid = null;
+  mode = 'viewer';
+  video.srcObject = null;
+  live = false;
+  updateButtons();
+  status('Conectando…');
+  startViewer();
+  if (msg) toast(msg);
+}
+
+async function onSenderMsg(msg) {
+  switch (msg.type) {
+    case 'denied': stopSharing(msg.reason); break;
+    case 'hello':
+      sid = msg.id;
+      for (const id of [...peers.keys()]) closePeer(id);
+      break;
+    case 'viewer-joined': connectPeer(msg.id); break;
+    case 'viewer-left': closePeer(msg.id); break;
+    case 'viewers':
+      relayCount = msg.relay;
+      $('presenter').textContent = `Você está apresentando · ${msg.count} assistindo`;
+      break;
+    case 'replaced': stopSharing(`${msg.by} assumiu a apresentação.`); break;
+    case 'signal': {
+      const p = peers.get(msg.from);
+      if (!p) return;
+      const { sdp, candidate } = msg.data;
+      if (sdp) {
+        await p.pc.setRemoteDescription(sdp);
+        for (const c of p.pending.splice(0)) await p.pc.addIceCandidate(c).catch(() => {});
+      } else if (candidate) {
+        if (p.pc.remoteDescription) await p.pc.addIceCandidate(candidate).catch(() => {});
+        else p.pending.push(candidate);
+      }
+      break;
+    }
+  }
+}
+
+async function connectPeer(viewerId) {
+  if (!stream) return;
+  closePeer(viewerId);
+  const p = new RTCPeerConnection(ICE);
+  peers.set(viewerId, { pc: p, pending: [] });
+  for (const t of stream.getTracks()) p.addTrack(t, stream);
+  p.onicecandidate = (e) => e.candidate && post('/signal', { from: sid, to: viewerId, data: { candidate: e.candidate } });
+  p.onconnectionstatechange = () => {
+    if (p.connectionState === 'connected') applyBitrate(p);
+    if (p.connectionState === 'failed') closePeer(viewerId);
+  };
+  await p.setLocalDescription(await p.createOffer());
+  post('/signal', { from: sid, to: viewerId, data: { sdp: p.localDescription } });
+}
+async function applyBitrate(p) {
+  for (const s of p.getSenders()) {
+    if (s.track?.kind !== 'video') continue;
+    const params = s.getParameters();
+    if (!params.encodings?.length) params.encodings = [{}];
+    params.encodings[0].maxBitrate = quality.bitrate;
+    params.degradationPreference = quality.hint === 'detail' ? 'maintain-resolution' : 'maintain-framerate';
+    await s.setParameters(params).catch(() => {});
+  }
+}
+function closePeer(id) {
+  const p = peers.get(id);
+  if (p) { p.pc.close(); peers.delete(id); }
+}
+
+// modo reserva do lado de quem apresenta: manda imagens JPEG pelo servidor.
+// O "relógio" roda num Worker para não ser freado quando a aba fica em segundo plano.
+const canvas = document.createElement('canvas');
+const ctx = canvas.getContext('2d');
+let relayBusy = false, imageCapture = null, captureTrack = null;
+const ticker = new Worker(URL.createObjectURL(new Blob(['setInterval(() => postMessage(0), 125)'])));
+ticker.onmessage = async () => {
+  if (mode !== 'sender' || !stream || !relayCount || relayBusy || !sid) return;
+  relayBusy = true;
+  try {
+    const vt = stream.getVideoTracks()[0];
+    let src;
+    if ('ImageCapture' in window) {
+      if (captureTrack !== vt) { imageCapture = new ImageCapture(vt); captureTrack = vt; }
+      src = await imageCapture.grabFrame();
+    } else {
+      src = video;
+    }
+    const sw = src.width || src.videoWidth, sh = src.height || src.videoHeight;
+    if (!sw) return;
+    const scale = Math.min(1, 1280 / sw);
+    canvas.width = Math.round(sw * scale); canvas.height = Math.round(sh * scale);
+    ctx.drawImage(src, 0, 0, canvas.width, canvas.height);
+    src.close?.();
+    const blob = await new Promise(r => canvas.toBlob(r, 'image/jpeg', 0.6));
+    await fetch('/frame', { method: 'POST', headers: { 'X-Id': sid, 'Content-Type': 'image/jpeg' }, body: blob });
+  } catch {} finally { relayBusy = false; }
+};
+
+// ---------- botões somem sozinhos enquanto assiste ----------
+let hideTimer;
+function showControls() {
+  $('controls').classList.remove('hidden');
+  clearTimeout(hideTimer);
+  hideTimer = setTimeout(() => {
+    const watching = mode === 'viewer' && $('overlay').classList.contains('hide');
+    if (watching && $('panel').classList.contains('hide')) $('controls').classList.add('hidden');
+  }, 3000);
+}
+['mousemove', 'touchstart', 'click'].forEach(ev => document.addEventListener(ev, showControls));
+
+updateButtons();
+startViewer();
+</script>
 </body>
 </html>
