@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: transmissor-tela
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: node server.js
+    healthCheckPath: /info
+    envVars:
+      - key: SHARE_CODE   # senha para apresentar a tela (o Render pede na hora de publicar)
+        sync: false
