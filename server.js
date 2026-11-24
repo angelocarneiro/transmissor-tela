@@ -153,7 +153,8 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'GET' && p === '/info') {
-      return json(res, 200, { ok: true, publicUrl, internet: INTERNET || HOSTED, rooms: rooms.size });
+      // MAX_VIEWERS: quantas pessoas podem assistir cada apresentador (protege a qualidade e o uso da ponte TURN)
+      return json(res, 200, { ok: true, publicUrl, internet: INTERNET || HOSTED, rooms: rooms.size, maxViewers: Number(process.env.MAX_VIEWERS) || 10 });
     }
     if (req.method === 'GET' && p === '/ice') {
       const iceServers = await getIceServers();
