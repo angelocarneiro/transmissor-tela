@@ -277,7 +277,8 @@ $('codeInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('jo
   const box = $('emblem'), tilt = $('emblemTilt');
   const reduce = matchMedia('(prefers-reduced-motion: reduce)');
   const mouse = matchMedia('(hover: hover) and (pointer: fine)'); // touchscreen fica só com a flutuação (CSS)
-  const MAX_ROT = 9, MAX_MOVE = 5, REACH = 140, EASE = 0.08;   // amplitude discreta, entrada suave
+  const area = document.querySelector('.hero');                 // reage quando o mouse passa pela área da chamada
+  const MAX_ROT = 6, MAX_MOVE = 10, REACH = 80, EASE = 0.07;   // amplitude discreta, entrada suave
   const REST = { rx: 0, ry: 0, tx: 0, ty: 0, glow: 0.2, gx: 50, gy: 50 };
   const cur = { ...REST }, tgt = { ...REST };
   let raf = null;
@@ -295,12 +296,12 @@ $('codeInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('jo
   const rest = () => { Object.assign(tgt, REST); kick(); };          // volta devagar à posição inicial
   window.addEventListener('pointermove', (e) => {
     if (e.pointerType !== 'mouse' || !mouse.matches || reduce.matches || $('landing').classList.contains('hide')) return;
-    const r = box.getBoundingClientRect();
-    const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
-    const near = e.clientX > r.left - REACH && e.clientX < r.right + REACH && e.clientY > r.top - REACH && e.clientY < r.bottom + REACH;
+    const a = area.getBoundingClientRect(), r = box.getBoundingClientRect();
+    const near = e.clientX > a.left - REACH && e.clientX < a.right + REACH && e.clientY > a.top - REACH && e.clientY < a.bottom + REACH;
     if (!near) return rest();
-    const nx = Math.max(-1, Math.min(1, (e.clientX - cx) / (r.width / 2 + REACH)));
-    const ny = Math.max(-1, Math.min(1, (e.clientY - cy) / (r.height / 2 + REACH)));
+    const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+    const nx = Math.max(-1, Math.min(1, (e.clientX - cx) / (r.width / 2)));
+    const ny = Math.max(-1, Math.min(1, (e.clientY - cy) / (r.height / 2)));
     Object.assign(tgt, { ry: nx * MAX_ROT, rx: -ny * MAX_ROT, tx: nx * MAX_MOVE, ty: ny * MAX_MOVE, glow: 0.8, gx: 50 + nx * 35, gy: 50 + ny * 35 });
     kick();
   }, { passive: true });

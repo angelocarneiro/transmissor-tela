@@ -23,6 +23,7 @@
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; min-height: 100%; }
+body { overflow-x: clip; } /* o emblema de fundo nunca cria rolagem para os lados */
 body { background: var(--bg); color: var(--ink); font: 15px/1.5 var(--f-texto); -webkit-font-smoothing: antialiased; }
 h1, h2, h3 { font-family: var(--f-titulo); letter-spacing: -.02em; margin: 0; text-wrap: balance; }
 button, input, select { font: inherit; color: inherit; }
@@ -69,10 +70,18 @@ svg { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor; s
     repeating-linear-gradient(0deg, transparent 0 39px, rgba(255,255,255,.025) 39px 40px),
     repeating-linear-gradient(90deg, transparent 0 39px, rgba(255,255,255,.025) 39px 40px);
 }
-/* emblema K/TV interativo (inclina com o mouse, flutua, brilha) */
-.emblem { width: clamp(150px, 15vw, 210px); aspect-ratio: 560 / 483; margin: 0 0 14px -12px; perspective: 700px; }
+/* emblema K/TV interativo: grande, ao fundo da chamada (inclina com o mouse, flutua, brilha) */
+.hero { position: relative; isolation: isolate; }
+.hero > :not(.emblem) { position: relative; z-index: 1; }   /* textos sempre na frente */
+.emblem {
+  position: absolute; z-index: 0; pointer-events: none;
+  width: clamp(460px, 54vw, 780px); aspect-ratio: 560 / 483;
+  left: 50%; top: 50%; transform: translate(-32%, -50%);   /* K atrás dos textos, TV "transmitindo" para o cartão */
+  perspective: 1200px; opacity: .62;
+}
+.join { position: relative; z-index: 2; }   /* o cartão Entrar fica sempre na frente do emblema */
 .emblem-float { width: 100%; height: 100%; animation: emblem-float 6s ease-in-out infinite; }
-@keyframes emblem-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
+@keyframes emblem-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
 .emblem-tilt {
   position: relative; width: 100%; height: 100%; transform-style: preserve-3d; will-change: transform;
   transform: translate3d(var(--tx, 0px), var(--ty, 0px), 0) rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg));
@@ -80,8 +89,8 @@ svg { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor; s
 .emblem-tilt img {
   display: block; width: 100%; height: 100%; user-select: none; -webkit-user-drag: none;
   /* bordas se dissolvem no fundo carvão, sem "quadrado" aparecendo */
-  -webkit-mask-image: radial-gradient(closest-side, #000 58%, transparent 100%);
-  mask-image: radial-gradient(closest-side, #000 58%, transparent 100%);
+  -webkit-mask-image: radial-gradient(closest-side, #000 52%, transparent 100%);
+  mask-image: radial-gradient(closest-side, #000 52%, transparent 100%);
 }
 .emblem-glow {
   position: absolute; inset: -8%; pointer-events: none; border-radius: 50%;
@@ -225,6 +234,7 @@ svg { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor; s
 /* ---------- celular / telas estreitas ---------- */
 @media (max-width: 860px) {
   .landing { grid-template-columns: 1fr; gap: 28px; padding: 28px 16px; min-height: auto; }
+  .emblem { width: min(118vw, 620px); transform: translate(-50%, -50%); opacity: .42; }
   .room { height: auto; min-height: 100vh; grid-template-columns: 1fr; grid-template-rows: 56px auto auto auto; }
   .topbar { padding: 0 12px; gap: 8px; }
   .topbar .chip.ghost, .conn span { display: none; }
