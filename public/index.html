@@ -38,14 +38,20 @@
 
 <!-- ================= ENTRADA ================= -->
 <main id="landing" class="landing">
+  <div id="pageGlow" class="page-glow" aria-hidden="true"></div>
   <section class="hero">
+    <!-- emblema de fundo: K grande atrás da chamada + TV transmitindo (PNG com fundo transparente) -->
     <div id="emblem" class="emblem" aria-hidden="true">
-      <div class="emblem-float">
-        <div id="emblemTilt" class="emblem-tilt">
-          <img src="/komand-emblema.jpg" alt="" width="560" height="483" decoding="async">
-          <span class="emblem-glow"></span>
+      <div class="emb-layer emb-k">
+        <div class="emb-float"><img src="/web-k.png" alt="" width="902" height="570" decoding="async"></div>
+      </div>
+      <div class="emb-layer emb-tv">
+        <div class="emb-float">
+          <img class="tv" src="/web-tv-corpo.png" alt="" width="482" height="438" decoding="async">
+          <img class="ondas" src="/web-tv-ondas.png" alt="" width="237" height="438" decoding="async">
         </div>
       </div>
+      <span class="emblem-glow"></span>
     </div>
     <div class="brand-line"><span class="logo">KOMAND <em>live</em></span><span class="tag">tela ao vivo, ponto a ponto</span></div>
     <h1>Sua tela, ao vivo,<br><span class="hl">direto para a sala.</span></h1>
@@ -274,13 +280,16 @@ $('codeInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('jo
 
 // ---------- emblema K/TV: acompanha o mouse com inclinação 3D e brilho ----------
 (function emblemFx() {
-  const box = $('emblem'), tilt = $('emblemTilt');
+  const box = $('emblem'), tilt = box; // as variáveis --rx/--ry/... valem para as duas camadas (K e TV)
   const reduce = matchMedia('(prefers-reduced-motion: reduce)');
   const mouse = matchMedia('(hover: hover) and (pointer: fine)'); // touchscreen fica só com a flutuação (CSS)
   const area = document.querySelector('.hero');                 // reage quando o mouse passa pela área da chamada
   const MAX_ROT = 6, MAX_MOVE = 10, REACH = 80, EASE = 0.07;   // amplitude discreta, entrada suave
-  const REST = { rx: 0, ry: 0, tx: 0, ty: 0, glow: 0.2, gx: 50, gy: 50 };
-  const cur = { ...REST }, tgt = { ...REST };
+  const REST = { rx: 0, ry: 0, tx: 0, ty: 0, glow: 0.25, gx: 70, gy: 40 };
+  // brilho da página inteira: posição (px, py em %) e intensidade (po)
+  const PAGE = { px: 72, py: 28, po: 0.55 };
+  const cur = { ...REST, ...PAGE }, tgt = { ...REST, ...PAGE };
+  const pageGlow = $('pageGlow');
   let raf = null;
   function frame() {
     let moving = false;
@@ -290,23 +299,33 @@ $('codeInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('jo
     s.setProperty('--tx', cur.tx.toFixed(2) + 'px');  s.setProperty('--ty', cur.ty.toFixed(2) + 'px');
     s.setProperty('--glow', cur.glow.toFixed(3));
     s.setProperty('--gx', cur.gx.toFixed(1) + '%');   s.setProperty('--gy', cur.gy.toFixed(1) + '%');
+    const g = pageGlow.style;
+    g.setProperty('--px', cur.px.toFixed(2) + '%'); g.setProperty('--py', cur.py.toFixed(2) + '%');
+    g.setProperty('--po', cur.po.toFixed(3));
     raf = moving ? requestAnimationFrame(frame) : null;
   }
   const kick = () => { if (!raf) raf = requestAnimationFrame(frame); };
   const rest = () => { Object.assign(tgt, REST); kick(); };          // volta devagar à posição inicial
   window.addEventListener('pointermove', (e) => {
     if (e.pointerType !== 'mouse' || !mouse.matches || reduce.matches || $('landing').classList.contains('hide')) return;
+    // o brilho da página segue o mouse em qualquer lugar da tela
+    Object.assign(tgt, { px: (e.clientX / innerWidth) * 100, py: (e.clientY / innerHeight) * 100, po: 1 });
+    kick();
     const a = area.getBoundingClientRect(), r = box.getBoundingClientRect();
     const near = e.clientX > a.left - REACH && e.clientX < a.right + REACH && e.clientY > a.top - REACH && e.clientY < a.bottom + REACH;
     if (!near) return rest();
     const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
     const nx = Math.max(-1, Math.min(1, (e.clientX - cx) / (r.width / 2)));
     const ny = Math.max(-1, Math.min(1, (e.clientY - cy) / (r.height / 2)));
-    Object.assign(tgt, { ry: nx * MAX_ROT, rx: -ny * MAX_ROT, tx: nx * MAX_MOVE, ty: ny * MAX_MOVE, glow: 0.8, gx: 50 + nx * 35, gy: 50 + ny * 35 });
+    // o brilho segue o cursor dentro da área da chamada
+    const gx = ((e.clientX - a.left) / a.width) * 100, gy = ((e.clientY - a.top) / a.height) * 100;
+    Object.assign(tgt, { ry: nx * MAX_ROT, rx: -ny * MAX_ROT, tx: nx * MAX_MOVE, ty: ny * MAX_MOVE, glow: 0.8,
+      gx: Math.max(0, Math.min(100, 14 + gx * 0.72)), gy: Math.max(0, Math.min(100, 8 + gy * 0.84)) });
     kick();
   }, { passive: true });
-  document.documentElement.addEventListener('pointerleave', rest);
-  window.addEventListener('blur', rest);
+  const leave = () => { tgt.po = PAGE.po; rest(); };            // mouse saiu da janela: brilho volta ao discreto
+  document.documentElement.addEventListener('pointerleave', leave);
+  window.addEventListener('blur', leave);
   reduce.addEventListener?.('change', rest);
 })();
 

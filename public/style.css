@@ -70,35 +70,43 @@ svg { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor; s
     repeating-linear-gradient(0deg, transparent 0 39px, rgba(255,255,255,.025) 39px 40px),
     repeating-linear-gradient(90deg, transparent 0 39px, rgba(255,255,255,.025) 39px 40px);
 }
-/* emblema K/TV interativo: grande, ao fundo da chamada (inclina com o mouse, flutua, brilha) */
-.hero { position: relative; isolation: isolate; }
+/* brilho laranja que acompanha o mouse pela página inteira (fica atrás de tudo) */
+.page-glow {
+  position: fixed; inset: 0; z-index: -1; pointer-events: none;
+  background: radial-gradient(640px circle at var(--px, 72%) var(--py, 28%), rgba(255, 106, 26, .15), rgba(255, 106, 26, .05) 40%, transparent 70%);
+  opacity: var(--po, .55);
+}
+
+/* ---------- emblema de fundo: K grande + TV transmitindo (PNG com fundo transparente) ---------- */
+.hero { position: relative; }
 .hero > :not(.emblem) { position: relative; z-index: 1; }   /* textos sempre na frente */
-.emblem {
-  position: absolute; z-index: 0; pointer-events: none;
-  width: clamp(460px, 54vw, 780px); aspect-ratio: 560 / 483;
-  left: 50%; top: 50%; transform: translate(-32%, -50%);   /* K atrás dos textos, TV "transmitindo" para o cartão */
-  perspective: 1200px; opacity: .62;
+.join { position: relative; z-index: 2; }                   /* cartão Entrar sempre na frente */
+.emblem { position: absolute; inset: 0; z-index: 0; pointer-events: none; perspective: 1200px; }
+.emb-layer {
+  position: absolute; will-change: transform;
+  /* a inclinação vem do JS (--rx, --ry, --tx, --ty); --d é a "profundidade" de cada camada */
+  transform: translate3d(calc(var(--tx, 0px) * var(--d)), calc(var(--ty, 0px) * var(--d)), 0)
+             rotateX(calc(var(--rx, 0deg) * var(--d))) rotateY(calc(var(--ry, 0deg) * var(--d)));
 }
-.join { position: relative; z-index: 2; }   /* o cartão Entrar fica sempre na frente do emblema */
-.emblem-float { width: 100%; height: 100%; animation: emblem-float 6s ease-in-out infinite; }
+.emb-layer img { display: block; width: 100%; height: auto; user-select: none; -webkit-user-drag: none; }
+.emblem { --kw: clamp(560px, 56vw, 820px); --kl: -32%; }   /* tamanho e posição do K (a TV fica na abertura dele) */
+.emb-k  { --d: .6; width: var(--kw); left: var(--kl); top: 50%; translate: 0 -50%; opacity: .5; }
+/* TV na abertura do K (entre o braço de cima e a perna de baixo), mais à frente,
+   deixando um respiro entre a letra e a TV */
+.emb-tv { --d: 1.3; width: calc(var(--kw) * .26); left: calc(var(--kl) + var(--kw) * .84); top: calc(50% + var(--kw) * .018); translate: -50% -50%; }
+.emb-tv .emb-float { position: relative; aspect-ratio: 707 / 438; animation-duration: 5s; animation-delay: -2s; }
+.emb-tv .tv    { position: absolute; left: 0; top: 0; width: 68.2%; }
+.emb-tv .ondas { position: absolute; left: 66.5%; top: 0; width: 33.5%; transform-origin: 0% 50%; animation: ondas 2.4s ease-in-out infinite; }
+.emb-float { animation: emblem-float 7s ease-in-out infinite; }
 @keyframes emblem-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
-.emblem-tilt {
-  position: relative; width: 100%; height: 100%; transform-style: preserve-3d; will-change: transform;
-  transform: translate3d(var(--tx, 0px), var(--ty, 0px), 0) rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg));
-}
-.emblem-tilt img {
-  display: block; width: 100%; height: 100%; user-select: none; -webkit-user-drag: none;
-  /* bordas se dissolvem no fundo carvão, sem "quadrado" aparecendo */
-  -webkit-mask-image: radial-gradient(closest-side, #000 52%, transparent 100%);
-  mask-image: radial-gradient(closest-side, #000 52%, transparent 100%);
-}
+@keyframes ondas { 0%, 100% { opacity: .6; transform: scale(.97); } 50% { opacity: 1; transform: scale(1.03); } }
 .emblem-glow {
-  position: absolute; inset: -8%; pointer-events: none; border-radius: 50%;
-  background: radial-gradient(circle at var(--gx, 50%) var(--gy, 50%), rgba(255, 106, 26, .38), transparent 55%);
-  opacity: var(--glow, .2); mix-blend-mode: screen; filter: blur(16px);
+  position: absolute; inset: -10% -20%; pointer-events: none; mix-blend-mode: screen; filter: blur(20px);
+  background: radial-gradient(circle at var(--gx, 70%) var(--gy, 40%), rgba(255, 106, 26, .3), transparent 45%);
+  opacity: var(--glow, .25);
 }
 @media (prefers-reduced-motion: reduce) {
-  .emblem-float { animation: none; }
+  .emb-float, .emb-tv .ondas { animation: none; }
 }
 
 .brand-line { display: flex; align-items: center; gap: 14px; margin-bottom: 22px; }
@@ -234,7 +242,8 @@ svg { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor; s
 /* ---------- celular / telas estreitas ---------- */
 @media (max-width: 860px) {
   .landing { grid-template-columns: 1fr; gap: 28px; padding: 28px 16px; min-height: auto; }
-  .emblem { width: min(118vw, 620px); transform: translate(-50%, -50%); opacity: .42; }
+  .emb-k  { width: min(120vw, 620px); left: -22%; opacity: .35; }
+  .emb-tv { display: none; } /* no celular fica só o K de fundo, para não poluir */
   .room { height: auto; min-height: 100vh; grid-template-columns: 1fr; grid-template-rows: 56px auto auto auto; }
   .topbar { padding: 0 12px; gap: 8px; }
   .topbar .chip.ghost, .conn span { display: none; }
