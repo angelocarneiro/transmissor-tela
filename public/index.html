@@ -122,6 +122,8 @@
     <img id="img" class="hide" alt="Tela transmitida">
     <div id="nameTag" class="name-tag hide"><i></i><span></span></div>
     <div id="modeTag" class="mode-tag hide">Modo reserva · sem som</div>
+    <div id="noSoundTag" class="mode-tag hide">Esta transmissão está sem som</div>
+    <button id="unmuteBtn" class="btn primary unmute hide"><svg><use href="#i-sound"/></svg>Toque para ativar o som</button>
     <button id="hidePreview" class="btn hide-preview hide">Ocultar prévia</button>
     <div id="stageMsg" class="stage-msg">
       <div id="stageIcon" class="big-ic"><svg><use href="#i-monitor"/></svg></div>
@@ -554,6 +556,8 @@ function resetIncoming() {
   stopRelay();
   video.srcObject = null;
   $('soundBtn').classList.add('hide');
+  $('unmuteBtn').classList.add('hide');
+  $('noSoundTag').classList.add('hide');
   $('nameTag').classList.add('hide');
   $('hidePreview').classList.add('hide');
 }
@@ -612,8 +616,10 @@ async function onSignal(from, d) {
       const pc = new RTCPeerConnection(cfg); inPc = pc;
       pc.ontrack = (ev) => {
         if (inPc !== pc) return;
-        video.srcObject = ev.streams[0]; video.muted = !wantSound; video.play().catch(() => {});
-        $('soundBtn').classList.toggle('hide', !ev.streams[0].getAudioTracks().length);
+        const st = ev.streams[0];
+        if (video.srcObject !== st) { video.srcObject = st; st.onaddtrack = st.onremovetrack = updateSoundUi; }
+        video.muted = !wantSound; video.play().catch(() => {});
+        updateSoundUi();
       };
       pc.onicecandidate = (ev) => ev.candidate && signal(from, { kind: 'cand-s', candidate: ev.candidate });
       pc.onconnectionstatechange = () => {
@@ -641,6 +647,8 @@ async function startRelay() {
   relay = true;
   clearTimeout(fallbackTimer);
   if (inPc) { inPc.close(); inPc = null; }
+  video.srcObject = null;
+  updateSoundUi();
   const sharer = watching;
   signal(sharer, { kind: 'relay-on' });
   stageMsg('Conexão direta indisponível', 'Usando o modo reserva…', true, false);
@@ -698,7 +706,9 @@ $('goBtn').onclick = async () => {
   post('/share', { on: true });
   if (!watching) watch(me.id);
   renderPeople();
-  if (vt.getSettings?.().displaySurface === 'monitor') {
+  if ($('audio').checked && !stream.getAudioTracks().length) {
+    toast('Sua transmissão está sem som. Para mandar o som, compartilhe uma aba (ou a tela inteira) e marque "Compartilhar áudio".');
+  } else if (vt.getSettings?.().displaySurface === 'monitor') {
     toast('Dica: compartilhar só uma janela ou aba deixa a transmissão mais leve e sem efeito espelho.');
   }
 };
@@ -790,13 +800,25 @@ function showReaction(name, kind) {
   $('reactions').append(f);
   setTimeout(() => f.remove(), 2700);
 }
-$('soundBtn').onclick = () => {
-  wantSound = !wantSound;
-  video.muted = !wantSound; video.play().catch(() => {});
+// Mostra o botão de som e o aviso "sem som" de acordo com o que está chegando.
+function updateSoundUi() {
+  const st = video.srcObject;
+  const live = !!st && watching && watching !== me.id && !relay;
+  const hasAudio = live && st.getAudioTracks().length > 0;
+  $('soundBtn').classList.toggle('hide', !hasAudio);
+  $('unmuteBtn').classList.toggle('hide', !hasAudio || wantSound);
+  $('noSoundTag').classList.toggle('hide', !live || hasAudio);
   $('soundBtn').classList.toggle('on', wantSound);
   $('soundBtn').title = wantSound ? 'Desativar som' : 'Ativar som';
   $('soundBtn').querySelector('use').setAttribute('href', wantSound ? '#i-sound' : '#i-mute');
-};
+}
+function setSound(on) {
+  wantSound = on;
+  video.muted = !wantSound; video.play().catch(() => {});
+  updateSoundUi();
+}
+$('soundBtn').onclick = () => setSound(!wantSound);
+$('unmuteBtn').onclick = () => setSound(true);
 $('fullBtn').onclick = () => {
   if (document.fullscreenElement) document.exitFullscreen();
   else ($('stage').requestFullscreen?.() || video.webkitEnterFullscreen?.());
