@@ -97,12 +97,14 @@
     <img id="img" class="hide" alt="Tela transmitida">
     <div id="nameTag" class="name-tag hide"><i></i><span></span></div>
     <div id="modeTag" class="mode-tag hide">Modo reserva · sem som</div>
+    <button id="hidePreview" class="btn hide-preview hide">Ocultar prévia</button>
     <div id="stageMsg" class="stage-msg">
       <div id="stageIcon" class="big-ic"><svg><use href="#i-monitor"/></svg></div>
       <div id="stageSpin" class="spinner hide"></div>
       <h3 id="stageTitle">Ninguém está transmitindo</h3>
       <p id="stageText">Quando alguém compartilhar a tela, ela aparece aqui.</p>
       <button id="stageShare" class="btn primary"><svg><use href="#i-monitor"/></svg>Compartilhar minha tela</button>
+      <button id="stagePreview" class="btn hide"><svg><use href="#i-eye"/></svg>Ver prévia</button>
       <p id="mobileHint" class="hint hide">No celular dá para assistir. Para transmitir, use um computador.</p>
     </div>
     <div id="reactions" class="reactions"></div>
@@ -351,7 +353,7 @@ function personItem(p, clickable) {
   if (p.id === me.id) { const b = document.createElement('span'); b.className = 'badge'; b.textContent = 'VOCÊ'; nm.append(b); }
   const sub = document.createElement('div'); sub.className = 'sub';
   sub.textContent = p.sharing
-    ? (p.id === watching ? (p.id === me.id ? 'Vendo a sua tela' : 'Assistindo agora') : (p.id === me.id ? 'Transmitindo' : 'Clique para assistir'))
+    ? (p.id === me.id ? 'Transmitindo' : (p.id === watching ? 'Assistindo agora' : 'Clique para assistir'))
     : (p.id === me.id ? 'Você' : 'Conectado');
   info.append(nm, sub); li.append(info);
   if (p.sharing && p.id === watching) { const e = svgIcon('i-eye'); e.classList.add('watch-ic'); li.append(e); }
@@ -380,8 +382,32 @@ function stageMsg(title, text, spinning, showShare) {
   $('stageTitle').textContent = title; $('stageText').textContent = text;
   $('stageSpin').classList.toggle('hide', !spinning); $('stageIcon').classList.toggle('hide', spinning);
   $('stageShare').classList.toggle('hide', !showShare || !canShare || !!myStream);
+  $('stagePreview').classList.add('hide');
 }
 function hideStageMsg() { $('stageMsg').classList.add('hide'); }
+
+// Quem transmite NÃO vê a própria tela por padrão: mostrar a própria tela enquanto
+// compartilha a tela inteira cria o "efeito espelho" (túnel infinito) e deixa o vídeo pesado.
+let selfPreview = false;
+function showSelfStage() {
+  if (watching !== me.id || !myStream) return;
+  $('hidePreview').classList.toggle('hide', !selfPreview);
+  if (selfPreview) {
+    video.srcObject = myStream; video.muted = true; video.play().catch(() => {});
+    hideStageMsg();
+    setNameTag('Prévia da sua tela');
+    return;
+  }
+  video.srcObject = null;
+  const n = [...outPeers.values()].filter(p => p.pc || p.relay).length;
+  stageMsg('Você está transmitindo',
+    n ? `${n} ${n === 1 ? 'pessoa está' : 'pessoas estão'} assistindo a sua tela.` : 'Ninguém assistindo ainda. Mande o link do convite para a turma.',
+    false, false);
+  $('stagePreview').classList.remove('hide');
+  setNameTag('');
+}
+$('stagePreview').onclick = () => { selfPreview = true; showSelfStage(); };
+$('hidePreview').onclick = () => { selfPreview = false; showSelfStage(); };
 function setNameTag(text) {
   $('nameTag').classList.toggle('hide', !text);
   $('nameTag').querySelector('span').textContent = text || '';
@@ -404,8 +430,7 @@ function watch(id) {
   watching = id;
   const p = members.find(x => x.id === id);
   if (id === me.id) {
-    video.srcObject = myStream; video.muted = true; video.play().catch(() => {});
-    hideStageMsg(); setNameTag('Você está transmitindo');
+    showSelfStage();
   } else {
     stageMsg(`Conectando à tela de ${p ? p.name : 'alguém'}…`, 'Só um instante.', true, false);
     setNameTag(p ? p.name : '');
@@ -424,6 +449,7 @@ function resetIncoming() {
   video.srcObject = null;
   $('soundBtn').classList.add('hide');
   $('nameTag').classList.add('hide');
+  $('hidePreview').classList.add('hide');
 }
 
 function armFallback(ms) {
@@ -530,6 +556,8 @@ $('goBtn').onclick = async () => {
     stream = await navigator.mediaDevices.getDisplayMedia({
       video: { frameRate: { ideal: quality.fps, max: quality.fps }, width: { ideal: 1920 }, height: { ideal: 1080 } },
       audio: $('audio').checked,
+      selfBrowserSurface: 'exclude', // não oferece a própria aba do KOMAND (evita o efeito espelho)
+      surfaceSwitching: 'include',
     });
   } catch (e) {
     $('panelError').textContent = e.name === 'NotAllowedError' ? 'Compartilhamento cancelado.' : 'Não deu para capturar a tela: ' + e.message;
@@ -541,9 +569,13 @@ $('goBtn').onclick = async () => {
   const vt = stream.getVideoTracks()[0];
   vt.contentHint = quality.hint;
   vt.onended = () => stopShare(); // botão "Parar de compartilhar" do navegador
+  selfPreview = false;
   post('/share', { on: true });
   if (!watching) watch(me.id);
   renderPeople();
+  if (vt.getSettings?.().displaySurface === 'monitor') {
+    toast('Dica: compartilhar só uma janela ou aba deixa a transmissão mais leve e sem efeito espelho.');
+  }
 };
 
 function stopShare(silent) {
@@ -552,6 +584,7 @@ function stopShare(silent) {
   myStream = null;
   closeAllOut();
   if (!silent) post('/share', { on: false });
+  $('hidePreview').classList.add('hide');
   if (watching === me.id) { watching = null; video.srcObject = null; autoWatch(); }
   renderPeople();
 }
@@ -567,6 +600,7 @@ async function startOut(viewerId) {
   pc.onconnectionstatechange = () => { if (pc.connectionState === 'connected') applyBitrate(pc); };
   await pc.setLocalDescription(await pc.createOffer());
   signal(viewerId, { kind: 'offer', sdp: pc.localDescription });
+  showSelfStage();
 }
 async function applyBitrate(pc) {
   for (const s of pc.getSenders()) {
@@ -578,7 +612,7 @@ async function applyBitrate(pc) {
     await s.setParameters(params).catch(() => {});
   }
 }
-function closeOut(id) { const p = outPeers.get(id); if (p) { p.pc?.close(); outPeers.delete(id); } }
+function closeOut(id) { const p = outPeers.get(id); if (p) { p.pc?.close(); outPeers.delete(id); showSelfStage(); } }
 function closeAllOut() { for (const id of [...outPeers.keys()]) closeOut(id); }
 
 // modo reserva de quem transmite: manda JPEG pelo servidor só se alguém precisar.

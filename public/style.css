@@ -153,6 +153,7 @@ svg { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor; s
 .stage video, .stage img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
 .name-tag { position: absolute; left: 14px; bottom: 14px; display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 9px; background: rgba(18,18,18,.85); border: 1px solid var(--line-2); font-weight: 600; font-size: 14px; backdrop-filter: blur(6px); }
 .name-tag i { width: 8px; height: 8px; border-radius: 50%; background: var(--laranja); }
+.hide-preview { position: absolute; top: 14px; right: 14px; padding: 7px 12px; font-size: 13px; box-shadow: 2px 2px 0 var(--sombra); }
 .mode-tag { position: absolute; right: 14px; bottom: 14px; padding: 5px 10px; border-radius: 8px; font-size: 12px; background: #4A2A00; color: #FFCF8A; border: 1px solid #7A4A10; }
 .stage-msg { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; text-align: center; padding: 24px; }
 .stage-msg h3 { font-size: 22px; }
