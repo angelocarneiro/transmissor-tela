@@ -1,6 +1,6 @@
-// Transmissor de Tela - servidor (sem dependências)
+// KOMAND Live - servidor de salas para transmitir a tela (sem dependências)
 // Uso: node server.js [porta] [--internet]
-//   --internet  cria um link público (via túnel SSH do localhost.run) para quem está fora da sua rede
+//   --internet  cria um link público temporário (via túnel SSH do localhost.run)
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -12,25 +12,17 @@ const args = process.argv.slice(2);
 const PORT = Number(process.env.PORT || args.find((a) => /^\d+$/.test(a)) || 3030);
 const INTERNET = args.includes('--internet');
 const PUBLIC = path.join(__dirname, 'public');
-
-// clientes conectados via Server-Sent Events: id -> { role, res, relay }
-const clients = new Map();
-let senderId = null;
-let senderName = '';
-// hospedado na internet (Render define RENDER e RENDER_EXTERNAL_URL)
 const HOSTED = !!(process.env.RENDER || process.env.HOSTED);
 let publicUrl = process.env.RENDER_EXTERNAL_URL || process.env.PUBLIC_URL || null;
 
 // ---------- servidores ICE (STUN + ponte TURN) ----------
-// Com a ponte TURN o vídeo passa mesmo quando a conexão direta é bloqueada (4G, roteadores).
-// Cloudflare: defina CF_TURN_KEY_ID e CF_TURN_API_TOKEN (painel da Cloudflare > Realtime > TURN).
+// Cloudflare: CF_TURN_KEY_ID e CF_TURN_API_TOKEN (painel da Cloudflare > Realtime > TURN Server).
 // Outro provedor: TURN_URLS (separadas por vírgula), TURN_USERNAME e TURN_CREDENTIAL.
 const STUN = { urls: ['stun:stun.cloudflare.com:3478', 'stun:stun.l.google.com:19302'] };
 let iceCache = null, iceCacheAt = 0;
 async function getIceServers() {
   if (iceCache && Date.now() - iceCacheAt < 6 * 3600e3) return iceCache;
   const servers = [STUN];
-  // remove espaços, quebras de linha e aspas que às vezes vêm junto ao colar
   const clean = (v) => String(v || '').replace(/[\s"']/g, '');
   const keyId = clean(process.env.CF_TURN_KEY_ID), token = clean(process.env.CF_TURN_API_TOKEN);
   try {
@@ -40,11 +32,9 @@ async function getIceServers() {
       let r = await fetch(`${base}/generate-ice-servers`, opts);
       if (r.status === 404) r = await fetch(`${base}/generate`, opts);
       if (!r.ok) {
-        // ajuda a diagnosticar sem expor os códigos: só tamanho e formato
         const detail = (await r.text().catch(() => '')).slice(0, 200).replace(/\s+/g, ' ');
         throw new Error(`Cloudflare respondeu ${r.status} (${detail || 'sem detalhe'}). `
-          + `CF_TURN_KEY_ID tem ${keyId.length} caracteres${/^[0-9a-f]+$/i.test(keyId) ? ' (hexadecimal)' : ' (NÃO é hexadecimal)'}, `
-          + `CF_TURN_API_TOKEN tem ${token.length} caracteres.`);
+          + `CF_TURN_KEY_ID tem ${keyId.length} caracteres, CF_TURN_API_TOKEN tem ${token.length}.`);
       }
       const j = await r.json();
       const list = Array.isArray(j.iceServers) ? j.iceServers : [j.iceServers];
@@ -54,41 +44,65 @@ async function getIceServers() {
     }
   } catch (e) {
     log('Não consegui pegar a ponte TURN: ' + e.message);
-    return servers; // tenta de novo no próximo pedido
+    return servers;
   }
   iceCache = servers; iceCacheAt = Date.now();
   return servers;
 }
 
-// modo reserva: último quadro JPEG enviado pelo transmissor
-let frame = null, frameSeq = 0, lastClientFrame = 0;
-let frameWaiters = [];
+// ---------- salas ----------
+// sala: { code, hostId, members: Map(id -> { id, name, res, sharing }), frames: Map(sharerId -> quadro), emptySince }
+const rooms = new Map();
+const MAX_ROOMS = 500, MAX_MEMBERS = 50;
+const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // sem 0/O e 1/I, que confundem
 
-function send(id, msg) {
-  const c = clients.get(id);
-  if (c) c.res.write(`data: ${JSON.stringify(msg)}\n\n`);
+function newCode() {
+  let code;
+  do {
+    let s = '';
+    for (let i = 0; i < 8; i++) s += ALPHABET[crypto.randomInt(ALPHABET.length)];
+    code = s.slice(0, 4) + '-' + s.slice(4);
+  } while (rooms.has(code));
+  return code;
+}
+function normCode(c) {
+  const s = String(c || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  return s.length === 8 ? s.slice(0, 4) + '-' + s.slice(4) : null;
+}
+function cleanName(n) {
+  return String(n || '').replace(/[\u0000-\u001f<>]/g, '').trim().slice(0, 24) || 'Convidado';
 }
 
-function viewerIds() {
-  return [...clients.entries()].filter(([, c]) => c.role === 'viewer').map(([id]) => id);
+function send(room, id, msg) {
+  const m = room.members.get(id);
+  if (m) m.res.write(`data: ${JSON.stringify(msg)}\n\n`);
+}
+function broadcast(room, msg) {
+  for (const id of room.members.keys()) send(room, id, msg);
+}
+function pushMembers(room) {
+  const members = [...room.members.values()].map((m) => ({ id: m.id, name: m.name, sharing: m.sharing }));
+  broadcast(room, { type: 'members', members, hostId: room.hostId });
 }
 
-function broadcastStatus() {
-  for (const id of viewerIds()) send(id, { type: 'status', live: !!senderId, name: senderName });
-  if (senderId) {
-    const ids = viewerIds();
-    send(senderId, { type: 'viewers', count: ids.length, relay: ids.filter((id) => clients.get(id).relay).length });
-  }
-}
+// salas vazias somem depois de 30 minutos
+setInterval(() => {
+  const limit = Date.now() - 30 * 60e3;
+  for (const [code, room] of rooms) if (!room.members.size && room.emptySince < limit) rooms.delete(code);
+}, 60e3).unref();
 
+// ---------- utilidades HTTP ----------
 function serveFile(res, file, type) {
   fs.readFile(path.join(PUBLIC, file), (err, data) => {
     if (err) { res.writeHead(404); return res.end('Não encontrado'); }
-    res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-store' });
+    res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-cache' });
     res.end(data);
   });
 }
-
+function json(res, status, obj) {
+  res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+  res.end(JSON.stringify(obj));
+}
 function readBody(req, limit = 1e6) {
   return new Promise((resolve, reject) => {
     const chunks = []; let size = 0;
@@ -97,155 +111,162 @@ function readBody(req, limit = 1e6) {
     req.on('error', reject);
   });
 }
+async function readJson(req) {
+  return JSON.parse(String(await readBody(req)) || '{}');
+}
+// confere se quem mandou está mesmo na sala
+function memberOf(body) {
+  const room = rooms.get(normCode(body.room));
+  const me = room && room.members.get(body.from);
+  return me ? { room, me } : null;
+}
+
+const REACTIONS = new Set(['like', 'heart', 'fire']);
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x');
-  // pedido feito no próprio PC (e não vindo pelo túnel público)
-  const isLocal = !HOSTED && ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress)
-    && !req.headers['x-forwarded-for']
-    && /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/.test(req.headers.host || '');
+  const p = url.pathname;
 
-  // uma página só para assistir e compartilhar (os endereços antigos abrem a mesma)
-  if (req.method === 'GET' && ['/', '/assistir', '/transmitir'].includes(url.pathname)) return serveFile(res, 'index.html', 'text/html; charset=utf-8');
-  if (req.method === 'GET' && url.pathname === '/style.css') return serveFile(res, 'style.css', 'text/css; charset=utf-8');
+  try {
+    // páginas
+    if (req.method === 'GET' && (p === '/' || p === '/assistir' || p === '/transmitir' || /^\/sala\/[A-Za-z0-9-]+\/?$/.test(p))) {
+      return serveFile(res, 'index.html', 'text/html; charset=utf-8');
+    }
+    if (req.method === 'GET' && p === '/style.css') return serveFile(res, 'style.css', 'text/css; charset=utf-8');
 
-  if (req.method === 'GET' && url.pathname === '/info') {
-    res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
-    return res.end(JSON.stringify({
-      port: PORT, ips: HOSTED ? [] : localIps(), live: !!senderId, presenter: senderName, internet: INTERNET || HOSTED, publicUrl,
-      isHost: isLocal,
-    }));
-  }
-
-  // canal de eventos (servidor -> navegador)
-  if (req.method === 'GET' && url.pathname === '/events') {
-    const role = url.searchParams.get('role') === 'sender' ? 'sender' : 'viewer';
-    const id = crypto.randomUUID();
-    res.writeHead(200, {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-store',
-      Connection: 'keep-alive',
-      'X-Accel-Buffering': 'no',
-    });
-    res.write(`: ${' '.repeat(2048)}\n\n`); // evita que proxies segurem o fluxo
-
-    // um por vez: quem chega espera o atual parar (só o anfitrião, no próprio PC, pode assumir)
-    if (role === 'sender' && senderId && clients.has(senderId) && !isLocal) {
-      const reason = `${senderName} já está apresentando. Espere terminar para compartilhar a sua tela.`;
-      res.write(`data: ${JSON.stringify({ type: 'denied', reason })}\n\n`);
-      return res.end();
+    if (req.method === 'GET' && p === '/info') {
+      return json(res, 200, { ok: true, publicUrl, internet: INTERNET || HOSTED, rooms: rooms.size });
+    }
+    if (req.method === 'GET' && p === '/ice') {
+      const iceServers = await getIceServers();
+      return json(res, 200, { iceServers, turn: iceServers.length > 1 });
     }
 
-    res.write(`data: ${JSON.stringify({ type: 'hello', id, role })}\n\n`);
-    const ping = setInterval(() => res.write(': ping\n\n'), 15000);
-    clients.set(id, { role, res, relay: false });
-
-    if (role === 'sender') {
-      const name = (url.searchParams.get('name') || '').trim().slice(0, 30) || 'Alguém';
-      if (senderId) send(senderId, { type: 'replaced', by: name }); // um apresentador por vez
-      senderId = id;
-      senderName = name;
-      frame = null; lastClientFrame = 0;
-      for (const v of viewerIds()) send(senderId, { type: 'viewer-joined', id: v });
-      log(`${name} começou a apresentar (${viewerIds().length} espectador(es))`);
-    } else {
-      if (senderId) send(senderId, { type: 'viewer-joined', id });
-      log(`Espectador entrou (${viewerIds().length} no total)`);
+    // criar sala
+    if (req.method === 'POST' && p === '/api/rooms') {
+      if (rooms.size >= MAX_ROOMS) return json(res, 503, { error: 'Muitas salas abertas agora. Tente de novo em alguns minutos.' });
+      const code = newCode();
+      rooms.set(code, { code, hostId: null, members: new Map(), frames: new Map(), emptySince: Date.now() });
+      log(`Sala ${code} criada`);
+      return json(res, 200, { code });
     }
-    broadcastStatus();
+    // conferir se a sala existe
+    const m = p.match(/^\/api\/rooms\/([A-Za-z0-9-]+)$/);
+    if (req.method === 'GET' && m) {
+      const room = rooms.get(normCode(m[1]));
+      if (!room) return json(res, 404, { exists: false });
+      return json(res, 200, { exists: true, count: room.members.size, sharing: [...room.members.values()].filter((x) => x.sharing).length });
+    }
 
-    req.on('close', () => {
-      clearInterval(ping);
-      clients.delete(id);
-      if (id === senderId) {
-        senderId = null;
-        senderName = '';
-        frame = null;
-        for (const v of viewerIds()) send(v, { type: 'sender-left' });
-        log('Apresentação encerrada');
-      } else if (role === 'viewer') {
-        if (senderId) send(senderId, { type: 'viewer-left', id });
-        log(`Espectador saiu (${viewerIds().length} no total)`);
+    // canal de eventos da sala (servidor -> navegador)
+    if (req.method === 'GET' && p === '/events') {
+      res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
+      res.write(`: ${' '.repeat(2048)}\n\n`); // evita que proxies segurem o fluxo
+      const room = rooms.get(normCode(url.searchParams.get('room')));
+      const fail = (reason) => { res.write(`data: ${JSON.stringify({ type: 'error', reason })}\n\n`); res.end(); };
+      if (!room) return fail('Essa sala não existe mais. Crie uma nova ou confira o código.');
+      if (room.members.size >= MAX_MEMBERS) return fail('A sala está cheia.');
+
+      const id = crypto.randomUUID();
+      const name = cleanName(url.searchParams.get('name'));
+      room.members.set(id, { id, name, res, sharing: false });
+      if (!room.hostId || !room.members.has(room.hostId)) room.hostId = id;
+      res.write(`data: ${JSON.stringify({ type: 'hello', id, code: room.code })}\n\n`);
+      pushMembers(room);
+      log(`${name} entrou na sala ${room.code} (${room.members.size})`);
+      const ping = setInterval(() => res.write(': ping\n\n'), 15000);
+
+      req.on('close', () => {
+        clearInterval(ping);
+        const me = room.members.get(id);
+        room.members.delete(id);
+        room.frames.delete(id);
+        if (me && me.sharing) broadcast(room, { type: 'share-ended', id });
+        if (room.hostId === id) room.hostId = room.members.keys().next().value || null;
+        if (!room.members.size) room.emptySince = Date.now();
+        pushMembers(room);
+        log(`${name} saiu da sala ${room.code} (${room.members.size})`);
+      });
+      return;
+    }
+
+    // sinalização WebRTC entre duas pessoas da mesma sala
+    if (req.method === 'POST' && p === '/signal') {
+      const body = await readJson(req);
+      const ctx = memberOf(body);
+      if (!ctx) return json(res, 403, { error: 'fora da sala' });
+      if (ctx.room.members.has(body.to)) send(ctx.room, body.to, { type: 'signal', from: body.from, data: body.data });
+      res.writeHead(204); return res.end();
+    }
+
+    // começar / parar de transmitir
+    if (req.method === 'POST' && p === '/share') {
+      const body = await readJson(req);
+      const ctx = memberOf(body);
+      if (!ctx) return json(res, 403, { error: 'fora da sala' });
+      const on = !!body.on;
+      if (ctx.me.sharing !== on) {
+        ctx.me.sharing = on;
+        if (!on) { ctx.room.frames.delete(ctx.me.id); broadcast(ctx.room, { type: 'share-ended', id: ctx.me.id }); }
+        pushMembers(ctx.room);
+        log(`${ctx.me.name} ${on ? 'começou' : 'parou'} de transmitir na sala ${ctx.room.code}`);
       }
-      broadcastStatus();
-    });
-    return;
-  }
-
-  // mensagens de sinalização WebRTC (navegador -> servidor -> outro navegador)
-  if (req.method === 'POST' && url.pathname === '/signal') {
-    try {
-      const { from, to, data } = JSON.parse(await readBody(req));
-      if (!clients.has(from)) { res.writeHead(403); return res.end(); }
-      const target = to === 'sender' ? senderId : to;
-      if (target && clients.has(target)) send(target, { type: 'signal', from, data });
       res.writeHead(204); return res.end();
-    } catch {
-      res.writeHead(400); return res.end();
     }
-  }
 
-  // espectador avisa que a conexão direta falhou e vai usar o modo reserva
-  if (req.method === 'POST' && url.pathname === '/relay') {
-    try {
-      const { id } = JSON.parse(await readBody(req));
-      const c = clients.get(id);
-      if (c && c.role === 'viewer' && !c.relay) { c.relay = true; log('Espectador usando modo reserva'); broadcastStatus(); }
+    // reações (curtir, coração, fogo)
+    if (req.method === 'POST' && p === '/react') {
+      const body = await readJson(req);
+      const ctx = memberOf(body);
+      if (!ctx || !REACTIONS.has(body.kind)) return json(res, 400, { error: 'reação inválida' });
+      const now = Date.now();
+      if (now - (ctx.me.lastReact || 0) > 300) {
+        ctx.me.lastReact = now;
+        broadcast(ctx.room, { type: 'react', from: ctx.me.id, name: ctx.me.name, kind: body.kind });
+      }
       res.writeHead(204); return res.end();
-    } catch {
-      res.writeHead(400); return res.end();
     }
-  }
 
-  // transmissor envia um quadro (modo reserva)
-  if (req.method === 'POST' && url.pathname === '/frame') {
-    if (!senderId || req.headers['x-id'] !== senderId) { res.writeHead(403); return res.end(); }
-    try {
-      const body = await readBody(req, 5e6);
-      // vários quadros podem estar a caminho ao mesmo tempo: descarta o que chegar atrasado
+    // modo reserva: quem transmite manda quadros JPEG...
+    if (req.method === 'POST' && p === '/frame') {
+      const ctx = memberOf({ room: url.searchParams.get('room'), from: req.headers['x-id'] });
+      if (!ctx || !ctx.me.sharing) { res.writeHead(403); return res.end(); }
+      const buf = await readBody(req, 5e6);
+      const f = ctx.room.frames.get(ctx.me.id) || { buf: null, seq: 0, last: 0, waiters: [] };
+      ctx.room.frames.set(ctx.me.id, f);
       const n = Number(req.headers['x-frame'] || 0);
-      if (n && n <= lastClientFrame) { res.writeHead(204); return res.end(); }
-      lastClientFrame = n;
-      frame = body;
-      frameSeq++;
-      const waiters = frameWaiters; frameWaiters = [];
-      for (const w of waiters) sendFrame(w);
+      if (!n || n > f.last) {
+        f.last = n; f.buf = buf; f.seq++;
+        const waiters = f.waiters; f.waiters = [];
+        for (const w of waiters) sendFrame(w, f);
+      }
       res.writeHead(204); return res.end();
-    } catch {
-      res.writeHead(400); return res.end();
     }
-  }
+    // ...e quem assiste busca o próximo (espera até chegar um novo)
+    if (req.method === 'GET' && p === '/frame') {
+      const room = rooms.get(normCode(url.searchParams.get('room')));
+      const f = room && room.frames.get(url.searchParams.get('sharer'));
+      const after = Number(url.searchParams.get('after') || 0);
+      if (!f) { res.writeHead(204); return res.end(); }
+      if (f.buf && f.seq > after) return sendFrame(res, f);
+      res._timer = setTimeout(() => { f.waiters = f.waiters.filter((w) => w !== res); res.writeHead(204); res.end(); }, 10000);
+      res.on('close', () => { clearTimeout(res._timer); f.waiters = f.waiters.filter((w) => w !== res); });
+      f.waiters.push(res);
+      return;
+    }
 
-  // configuração de conexão (STUN + ponte TURN com credenciais temporárias)
-  if (req.method === 'GET' && url.pathname === '/ice') {
-    const iceServers = await getIceServers();
-    res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
-    return res.end(JSON.stringify({ iceServers, turn: iceServers.length > 1 }));
+    res.writeHead(404); res.end('Não encontrado');
+  } catch (e) {
+    if (!res.headersSent) json(res, 400, { error: 'pedido inválido' });
+    else res.end();
   }
-
-  // espectador pede o próximo quadro (espera até chegar um novo)
-  if (req.method === 'GET' && url.pathname === '/frame') {
-    const after = Number(url.searchParams.get('after') || 0);
-    if (frame && frameSeq > after) return sendFrame(res);
-    const timer = setTimeout(() => {
-      frameWaiters = frameWaiters.filter((w) => w !== res);
-      res.writeHead(204); res.end();
-    }, 10000);
-    res.on('close', () => { clearTimeout(timer); frameWaiters = frameWaiters.filter((w) => w !== res); });
-    res._timer = timer;
-    frameWaiters.push(res);
-    return;
-  }
-
-  res.writeHead(404); res.end('Não encontrado');
 });
 
-function sendFrame(res) {
+function sendFrame(res, f) {
   clearTimeout(res._timer);
   if (res.writableEnded) return;
-  if (!frame) { res.writeHead(204); return res.end(); }
-  res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'no-store', 'X-Seq': String(frameSeq) });
-  res.end(frame);
+  res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'no-store', 'X-Seq': String(f.seq) });
+  res.end(f.buf);
 }
 
 function localIps() {
@@ -253,12 +274,11 @@ function localIps() {
     .filter((i) => i && i.family === 'IPv4' && !i.internal && !i.address.startsWith('169.254'))
     .map((i) => i.address);
 }
-
 function log(msg) {
   console.log(`[${new Date().toLocaleTimeString('pt-BR')}] ${msg}`);
 }
 
-// ---------- link público (túnel SSH via localhost.run) ----------
+// ---------- link público temporário (túnel SSH via localhost.run) ----------
 let tunnel = null;
 function startTunnel() {
   log('Criando link público…');
@@ -267,18 +287,17 @@ function startTunnel() {
     '-R', `80:127.0.0.1:${PORT}`, 'nokey@localhost.run',
   ], { windowsHide: true });
   const onData = (d) => {
-    const m = String(d).match(/https:\/\/[a-z0-9.-]+\.lhr\.life/i);
-    if (m && m[0] !== publicUrl) {
-      publicUrl = m[0];
-      console.log(`\n  >>> LINK PÚBLICO (assistir e compartilhar): ${publicUrl}/\n`);
+    const found = String(d).match(/https:\/\/[a-z0-9.-]+\.lhr\.life/i);
+    if (found && found[0] !== publicUrl) {
+      publicUrl = found[0];
+      console.log(`\n  >>> LINK PÚBLICO: ${publicUrl}/\n`);
     }
   };
   tunnel.stdout.on('data', onData);
   tunnel.stderr.on('data', onData);
   tunnel.on('error', () => log('Não encontrei o "ssh". No Windows 10/11 ele vem em Recursos Opcionais > Cliente OpenSSH.'));
   tunnel.on('exit', () => {
-    publicUrl = null;
-    tunnel = null;
+    publicUrl = null; tunnel = null;
     log('Link público caiu. Reconectando em 5 segundos…');
     setTimeout(startTunnel, 5000);
   });
@@ -294,11 +313,8 @@ server.on('error', (e) => {
 });
 
 server.listen(PORT, '0.0.0.0', () => {
-  if (HOSTED) {
-    console.log(`Transmissor de Tela no ar (modo hospedado) na porta ${PORT}. Link: ${publicUrl || '(defina PUBLIC_URL)'}`);
-    return;
-  }
-  console.log('\n  Transmissor de Tela rodando!\n');
+  if (HOSTED) return console.log(`KOMAND Live no ar (modo hospedado) na porta ${PORT}. Link: ${publicUrl || '(defina PUBLIC_URL)'}`);
+  console.log('\n  KOMAND Live rodando!\n');
   console.log(`  Abra neste PC:  http://localhost:${PORT}/`);
   for (const ip of localIps()) console.log(`  Na mesma rede: http://${ip}:${PORT}/`);
   console.log('\n  Ctrl+C para parar.\n');
