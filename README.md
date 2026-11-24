@@ -2,7 +2,7 @@
 
 Salas para transmitir a tela pelo navegador. Sem instalar nada, sem cadastro.
 
-**https://transmissor-tela.onrender.com**
+**https://komand-live.onrender.com**
 
 1. Escolha um apelido e clique em **Criar sala** (ou cole o código de uma sala e clique em **Entrar**).
 2. Mande o **link do convite** ou o **código** (ex.: `AB12-CD34`) para a turma.
