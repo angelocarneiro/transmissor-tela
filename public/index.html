@@ -3,71 +3,189 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Transmissor de Tela</title>
+<title>KOMAND Live</title>
+<meta name="description" content="Crie uma sala e transmita a tela pelo navegador. Sem instalar nada, sem cadastro.">
+<meta name="theme-color" content="#121212">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23FF6A1A'/%3E%3Crect x='7' y='9' width='18' height='12' rx='2' fill='none' stroke='%23121212' stroke-width='2.5'/%3E%3Cpath d='M12 25h8' stroke='%23121212' stroke-width='2.5' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/style.css">
 </head>
-<body class="viewer">
-<video id="video" autoplay muted playsinline></video>
-<img id="img" class="hide" alt="Tela transmitida">
+<body>
 
-<div id="overlay" class="overlay">
-  <div class="spinner"></div>
-  <div id="statusText">Conectando…</div>
-  <div class="row" style="margin-top:12px; justify-content:center">
-    <button id="shareBig">🖥️ Compartilhar minha tela</button>
-    <button id="copyBig" class="secondary">🔗 Copiar link da sala</button>
+<!-- ícones -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-monitor" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></symbol>
+  <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1.5"/></symbol>
+  <symbol id="i-like" viewBox="0 0 24 24"><path d="M7 10v12"/><path d="M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12 2a3.13 3.13 0 0 1 3 3.88Z"/></symbol>
+  <symbol id="i-heart" viewBox="0 0 24 24"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></symbol>
+  <symbol id="i-fire" viewBox="0 0 24 24"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.07-2.14-.22-4.05 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.15.43-2.29 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></symbol>
+  <symbol id="i-max" viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3"/></symbol>
+  <symbol id="i-sound" viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4V5z"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07M19.07 4.93a10 10 0 0 1 0 14.14"/></symbol>
+  <symbol id="i-mute" viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4V5z"/><path d="m22 9-6 6M16 9l6 6"/></symbol>
+  <symbol id="i-out" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5M21 12H9"/></symbol>
+  <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></symbol>
+  <symbol id="i-users" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></symbol>
+  <symbol id="i-crown" viewBox="0 0 24 24"><path d="m2 6 4 11h12l4-11-6 5-4-7-4 7z"/><path d="M6 21h12"/></symbol>
+  <symbol id="i-zap" viewBox="0 0 24 24"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></symbol>
+</svg>
+
+<!-- ================= ENTRADA ================= -->
+<main id="landing" class="landing">
+  <section class="hero">
+    <div class="brand-line"><span class="logo">KOMAND <em>live</em></span><span class="tag">tela ao vivo, ponto a ponto</span></div>
+    <h1>Sua tela, ao vivo,<br><span class="hl">direto para a sala.</span></h1>
+    <p class="lead">Crie uma sala, mande o código para a turma e transmita a tela pelo navegador. Sem instalar nada, sem cadastro.</p>
+    <ul class="feats">
+      <li><span class="ic"><svg><use href="#i-zap"/></svg></span>Sala na hora: entra por código ou pelo link</li>
+      <li><span class="ic"><svg><use href="#i-shield"/></svg></span>O vídeo vai de navegador para navegador, em alta qualidade</li>
+      <li><span class="ic"><svg><use href="#i-users"/></svg></span>Várias pessoas podem transmitir ao mesmo tempo</li>
+    </ul>
+  </section>
+
+  <section class="card join">
+    <h2>Entrar</h2>
+    <p class="mut">Escolha um apelido para aparecer na sala.</p>
+    <div id="inviteNote" class="invite-note hide"></div>
+    <div class="field-label">Apelido <span id="nickCount">0/24</span></div>
+    <div class="nick-row">
+      <span id="nickAvatar" class="avatar lg" style="background:#3A3633;color:#9A928A">?</span>
+      <input id="nick" class="input" maxlength="24" placeholder="Como vão te chamar" autocomplete="nickname">
+    </div>
+    <button id="createBtn" class="btn primary wide"><svg><use href="#i-plus"/></svg>Criar sala</button>
+    <div class="or">ou</div>
+    <div class="field-label">Código da sala</div>
+    <div class="code-row">
+      <input id="codeInput" class="input" maxlength="9" placeholder="XXXX-XXXX" autocomplete="off" spellcheck="false">
+      <button id="joinBtn" class="btn">Entrar <svg><use href="#i-arrow"/></svg></button>
+    </div>
+    <p id="landingError" class="error hide"></p>
+  </section>
+</main>
+
+<!-- ================= SALA ================= -->
+<div id="room" class="room hide">
+  <header class="topbar">
+    <span class="logo">KOMAND <em>live</em></span>
+    <button id="codeChip" class="chip" title="Copiar link do convite"><svg><use href="#i-link"/></svg><span id="codeChipText"></span></button>
+    <div class="spacer"></div>
+    <span class="chip ghost" title="Pessoas na sala"><svg><use href="#i-users"/></svg><span id="peopleCount">1</span></span>
+    <span id="connState" class="conn"><i></i><span>Conectando</span></span>
+  </header>
+
+  <aside class="side">
+    <div class="card code-card">
+      <div class="label">Código da sala</div>
+      <div class="code-big"><span id="codeBig"></span><button id="copyCode" class="icon-btn" title="Copiar código"><svg><use href="#i-copy"/></svg></button></div>
+      <button id="copyInvite" class="btn wide"><svg><use href="#i-link"/></svg>Copiar link do convite</button>
+    </div>
+    <div class="list-title">Transmitindo <span id="sharingCount">0</span></div>
+    <ul id="sharingList" class="people"></ul>
+    <div class="list-title">Na sala <span id="othersCount">0</span></div>
+    <ul id="memberList" class="people"></ul>
+    <div class="me">Você entrou como <b id="meName"></b></div>
+  </aside>
+
+  <section id="stage" class="stage">
+    <video id="video" autoplay playsinline muted></video>
+    <img id="img" class="hide" alt="Tela transmitida">
+    <div id="nameTag" class="name-tag hide"><i></i><span></span></div>
+    <div id="modeTag" class="mode-tag hide">Modo reserva · sem som</div>
+    <div id="stageMsg" class="stage-msg">
+      <div id="stageIcon" class="big-ic"><svg><use href="#i-monitor"/></svg></div>
+      <div id="stageSpin" class="spinner hide"></div>
+      <h3 id="stageTitle">Ninguém está transmitindo</h3>
+      <p id="stageText">Quando alguém compartilhar a tela, ela aparece aqui.</p>
+      <button id="stageShare" class="btn primary"><svg><use href="#i-monitor"/></svg>Compartilhar minha tela</button>
+      <p id="mobileHint" class="hint hide">No celular dá para assistir. Para transmitir, use um computador.</p>
+    </div>
+    <div id="reactions" class="reactions"></div>
+  </section>
+
+  <nav class="toolbar">
+    <button id="shareBtn" class="btn primary"><svg><use href="#i-monitor"/></svg><span>Compartilhar tela</span></button>
+    <button id="stopBtn" class="btn danger hide"><svg><use href="#i-stop"/></svg><span>Parar de transmitir</span></button>
+    <span class="sep"></span>
+    <button class="icon-btn react" data-kind="like" title="Curtir"><svg><use href="#i-like"/></svg></button>
+    <button class="icon-btn react" data-kind="heart" title="Amei"><svg><use href="#i-heart"/></svg></button>
+    <button class="icon-btn react" data-kind="fire" title="Fogo"><svg><use href="#i-fire"/></svg></button>
+    <span class="sep"></span>
+    <button id="soundBtn" class="icon-btn hide" title="Ativar som"><svg><use href="#i-mute"/></svg></button>
+    <button id="fullBtn" class="icon-btn" title="Tela cheia"><svg><use href="#i-max"/></svg></button>
+    <button id="leaveBtn" class="icon-btn" title="Sair da sala"><svg><use href="#i-out"/></svg></button>
+  </nav>
+</div>
+
+<!-- janela para começar a transmitir -->
+<div id="panel" class="modal hide">
+  <div class="card">
+    <h2>Compartilhar minha tela</h2>
+    <div class="field">
+      <div class="field-label">Qualidade</div>
+      <select id="quality" class="input">
+        <option value="leve">Leve: internet fraca</option>
+        <option value="normal" selected>Normal</option>
+        <option value="alta">Alta: texto bem nítido</option>
+        <option value="jogo">Jogo ou vídeo: 60 quadros por segundo</option>
+      </select>
+    </div>
+    <label class="check"><input type="checkbox" id="audio" checked> Mandar o som também</label>
+    <p class="hint">Para mandar o som de um vídeo, escolha compartilhar uma <b>aba</b> e marque "compartilhar áudio".</p>
+    <p id="panelError" class="error hide"></p>
+    <div class="actions">
+      <button id="cancelBtn" class="btn">Cancelar</button>
+      <button id="goBtn" class="btn primary">Começar</button>
+    </div>
   </div>
-  <div id="mobileHint" class="muted hide">No celular dá para assistir. Para compartilhar a tela, use um computador.</div>
 </div>
 
 <div id="toast" class="toast hide"></div>
 
-<div id="controls" class="controls hide">
-  <span id="presenter" class="badge live hide"></span>
-  <span id="modeTag" class="badge hide">Modo reserva · sem som</span>
-  <button id="sound" class="secondary hide">🔇 Ativar som</button>
-  <button id="full" class="secondary">⛶ Tela cheia</button>
-  <button id="copy" class="secondary">🔗 Link</button>
-  <button id="share" class="secondary">🖥️ Compartilhar</button>
-  <button id="stop" class="danger hide">■ Parar de compartilhar</button>
-</div>
-
-<!-- janelinha para começar a compartilhar -->
-<div id="panel" class="modal hide">
-  <div class="card" style="width:min(420px, 100%)">
-    <h2 style="margin-top:0">Compartilhar minha tela</h2>
-    <div class="row" style="flex-direction:column; align-items:stretch">
-      <label>Seu nome
-        <input type="text" id="name" maxlength="30" placeholder="Como vão te ver">
-      </label>
-      <label>Qualidade
-        <select id="quality">
-          <option value="leve">Leve (internet fraca)</option>
-          <option value="normal" selected>Normal</option>
-          <option value="alta">Alta (texto bem nítido)</option>
-          <option value="jogo">Jogo / vídeo (60 fps)</option>
-        </select>
-      </label>
-      <label class="check"><input type="checkbox" id="audio" checked> Mandar o som também</label>
-      <div class="muted">Dica: para mandar o som de um vídeo, escolha compartilhar uma <b>aba</b> e marque "compartilhar áudio".</div>
-    </div>
-    <p id="panelError" class="hide" style="color:var(--live)"></p>
-    <div class="row" style="margin-top:14px; justify-content:flex-end">
-      <button id="cancel" class="secondary">Cancelar</button>
-      <button id="go">▶ Começar</button>
-    </div>
-  </div>
-</div>
-
 <script>
-// configuração de conexão vem do servidor (inclui a ponte TURN, se estiver configurada)
+'use strict';
+const $ = (id) => document.getElementById(id);
+const video = $('video'), img = $('img');
+const canShare = !!navigator.mediaDevices?.getDisplayMedia;
+const QUALITY = {
+  leve:   { fps: 15, bitrate: 1500000, hint: 'detail', pref: 'balanced' },
+  normal: { fps: 30, bitrate: 4000000, hint: 'detail', pref: 'balanced' },
+  alta:   { fps: 30, bitrate: 8000000, hint: 'detail', pref: 'maintain-resolution' },
+  jogo:   { fps: 60, bitrate: 6000000, hint: 'motion', pref: 'maintain-framerate' },
+};
+const REACT_ICON = { like: 'i-like', heart: 'i-heart', fire: 'i-fire' };
+const COLORS = ['#FF6A1A', '#FFB547', '#F4EFE9', '#FF8F6B', '#E6C79C', '#FFD08A', '#C9A27E'];
+
+// ---------- utilidades ----------
+function colorFor(s) { let h = 0; for (const c of s) h = (h * 31 + c.charCodeAt(0)) >>> 0; return COLORS[h % COLORS.length]; }
+function initials(n) { const p = n.trim().split(/\s+/); return ((p[0]?.[0] || '?') + (p[1]?.[0] || p[0]?.[1] || '')).toUpperCase(); }
+function avatar(name, dot) {
+  const a = document.createElement('span');
+  a.className = 'avatar'; a.style.background = colorFor(name); a.textContent = initials(name);
+  if (dot) { const d = document.createElement('i'); d.className = 'dot' + (dot === 'live' ? ' live' : ''); a.append(d); }
+  return a;
+}
+function svgIcon(id) { const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); const u = document.createElementNS('http://www.w3.org/2000/svg', 'use'); u.setAttribute('href', '#' + id); s.append(u); return s; }
+let toastTimer;
+function toast(msg) { $('toast').textContent = msg; $('toast').classList.remove('hide'); clearTimeout(toastTimer); toastTimer = setTimeout(() => $('toast').classList.add('hide'), 4000); }
+function copy(text, ok) { navigator.clipboard.writeText(text).then(() => toast(ok), () => toast(text)); }
+function normCode(c) { const s = String(c || '').toUpperCase().replace(/[^A-Z0-9]/g, ''); return s.length === 8 ? s.slice(0, 4) + '-' + s.slice(4) : null; }
+let baseUrl = location.origin;
+fetch('/info').then(r => r.json()).then(i => { if (i.publicUrl) baseUrl = i.publicUrl; }).catch(() => {});
+const inviteLink = () => `${baseUrl}/sala/${roomCode}`;
+
+// configuração de conexão (STUN + ponte TURN), vinda do servidor
 let icePromise = null, iceAt = 0;
 function getIce() {
   if (!icePromise || Date.now() - iceAt > 3600e3) {
     iceAt = Date.now();
     icePromise = fetch('/ice', { cache: 'no-store' }).then(r => r.json())
       .then(j => ({ iceServers: j.iceServers
-        // a porta 53 costuma ser bloqueada e só atrasa a conexão
         .map(s => ({ ...s, urls: [].concat(s.urls).filter(u => !/:53(\?|$)/.test(u)) }))
         .filter(s => s.urls.length) }))
       .catch(() => ({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] }));
@@ -75,304 +193,383 @@ function getIce() {
   return icePromise;
 }
 getIce();
-const QUALITY = {
-  leve:   { fps: 15, bitrate: 1500000, hint: 'detail', pref: 'balanced' },
-  normal: { fps: 30, bitrate: 4000000, hint: 'detail', pref: 'balanced' },
-  alta:   { fps: 30, bitrate: 8000000, hint: 'detail', pref: 'maintain-resolution' },
-  jogo:   { fps: 60, bitrate: 6000000, hint: 'motion', pref: 'maintain-framerate' },
-};
-const $ = (id) => document.getElementById(id);
-const video = $('video'), img = $('img');
-const canShare = !!navigator.mediaDevices?.getDisplayMedia;
-let mode = 'viewer';          // 'viewer' ou 'sender'
-let live = false, presenterName = '';
-let roomUrl = location.origin + '/';
 
-// ---------- utilidades ----------
-function status(text, spinning = true) {
-  $('overlay').classList.toggle('hide', !text);
-  $('statusText').textContent = text || '';
-  $('overlay').querySelector('.spinner').classList.toggle('hide', !spinning);
+// ---------- estado ----------
+let roomCode = null, es = null;
+const me = { id: null, name: '' };
+let members = [], hostId = null;
+let watching = null;                       // id de quem estou assistindo
+let inPc = null, inPending = [];           // conexão de entrada (quem assisto)
+let relay = false, relaySession = 0, fallbackTimer = null, wantSound = false;
+let myStream = null, quality = QUALITY.normal;
+const outPeers = new Map();                // quem me assiste: id -> { pc, pending, relay }
+
+// =====================================================================
+// ENTRADA
+// =====================================================================
+const invited = normCode((location.pathname.match(/^\/sala\/([A-Za-z0-9-]+)/) || [])[1] || new URLSearchParams(location.search).get('sala'));
+try { $('nick').value = localStorage.getItem('komand-nick') || ''; } catch {}
+function updateNick() {
+  const n = $('nick').value;
+  $('nickCount').textContent = `${n.length}/24`;
+  const a = $('nickAvatar');
+  if (n.trim()) { a.textContent = initials(n); a.style.background = colorFor(n.trim()); a.style.color = '#160A02'; }
+  else { a.textContent = '?'; a.style.background = '#3A3633'; a.style.color = '#9A928A'; }
 }
-let toastTimer;
-function toast(msg) {
-  $('toast').textContent = msg; $('toast').classList.remove('hide');
-  clearTimeout(toastTimer); toastTimer = setTimeout(() => $('toast').classList.add('hide'), 6000);
+$('nick').addEventListener('input', updateNick);
+updateNick();
+if (invited) {
+  $('codeInput').value = invited;
+  $('inviteNote').textContent = `Você foi convidado para a sala ${invited}. Escolha um apelido e clique em Entrar.`;
+  $('inviteNote').classList.remove('hide');
 }
+$('codeInput').addEventListener('input', (e) => {
+  const s = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
+  e.target.value = s.length > 4 ? s.slice(0, 4) + '-' + s.slice(4) : s;
+});
+function landingError(msg) { $('landingError').textContent = msg || ''; $('landingError').classList.toggle('hide', !msg); }
+function getNick() {
+  const n = $('nick').value.trim();
+  if (!n) { landingError('Escolha um apelido primeiro.'); $('nick').focus(); return null; }
+  try { localStorage.setItem('komand-nick', n); } catch {}
+  return n;
+}
+$('createBtn').onclick = async () => {
+  landingError('');
+  const n = getNick(); if (!n) return;
+  $('createBtn').disabled = true;
+  try {
+    const r = await fetch('/api/rooms', { method: 'POST' });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error);
+    enterRoom(j.code, n);
+  } catch (e) { landingError(e.message || 'Não deu para criar a sala. Tente de novo.'); }
+  finally { $('createBtn').disabled = false; }
+};
+$('joinBtn').onclick = async () => {
+  landingError('');
+  const n = getNick(); if (!n) return;
+  const code = normCode($('codeInput').value);
+  if (!code) return landingError('O código tem 8 letras e números, por exemplo AB12-CD34.');
+  $('joinBtn').disabled = true;
+  try {
+    const r = await fetch('/api/rooms/' + code);
+    if (r.status === 404) return landingError('Não achei essa sala. Confira o código ou crie uma nova.');
+    enterRoom(code, n);
+  } catch { landingError('Sem conexão com o servidor. Tente de novo.'); }
+  finally { $('joinBtn').disabled = false; }
+};
+$('nick').addEventListener('keydown', (e) => { if (e.key === 'Enter') (invited ? $('joinBtn') : $('createBtn')).click(); });
+$('codeInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('joinBtn').click(); });
+
+// =====================================================================
+// SALA
+// =====================================================================
+function enterRoom(code, name) {
+  roomCode = code; me.name = name; me.id = null;
+  history.replaceState(null, '', '/sala/' + code);
+  document.title = `${code} · KOMAND Live`;
+  $('landing').classList.add('hide'); $('room').classList.remove('hide');
+  $('codeChipText').textContent = code; $('codeBig').textContent = code; $('meName').textContent = name;
+  $('shareBtn').classList.toggle('hide', !canShare);
+  $('stageShare').classList.toggle('hide', !canShare);
+  $('mobileHint').classList.toggle('hide', canShare);
+  showEmpty();
+  es = new EventSource('/events?' + new URLSearchParams({ room: code, name }));
+  setConn(false);
+  es.onerror = () => setConn(false);
+  es.onmessage = (e) => onMessage(JSON.parse(e.data));
+}
+
+function leaveRoom(reason) {
+  stopShare(true);
+  resetIncoming();
+  closeAllOut();
+  if (es) { es.close(); es = null; }
+  roomCode = null; me.id = null; members = []; watching = null;
+  history.replaceState(null, '', '/');
+  document.title = 'KOMAND Live';
+  $('room').classList.add('hide'); $('landing').classList.remove('hide');
+  $('inviteNote').classList.add('hide');
+  landingError(reason || '');
+}
+
+function setConn(ok) {
+  $('connState').classList.toggle('ok', ok);
+  $('connState').querySelector('span').textContent = ok ? 'Conectado' : 'Reconectando';
+}
+
 let chain = Promise.resolve();
 function post(path, data) {
-  const body = JSON.stringify(data);
+  const body = JSON.stringify({ room: roomCode, from: me.id, ...data });
   chain = chain.then(() => fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body })).catch(() => {});
 }
-function updateButtons() {
-  const sending = mode === 'sender';
-  $('stop').classList.toggle('hide', !sending);
-  for (const b of [$('share'), $('shareBig')]) {
-    b.classList.toggle('hide', sending || !canShare);
-    b.disabled = live;
-    b.title = live ? `${presenterName} está apresentando. Espere terminar.` : '';
+const signal = (to, data) => post('/signal', { to, data });
+
+function onMessage(m) {
+  switch (m.type) {
+    case 'error':
+      leaveRoom(m.reason);
+      break;
+    case 'hello': {
+      const reconnect = !!me.id;
+      me.id = m.id; setConn(true);
+      if (reconnect) { // caiu e voltou: refaz tudo com o novo id
+        resetIncoming(); closeAllOut(); watching = null;
+        if (myStream) post('/share', { on: true });
+      }
+      break;
+    }
+    case 'members':
+      members = m.members; hostId = m.hostId;
+      for (const id of [...outPeers.keys()]) if (!members.some(x => x.id === id)) closeOut(id);
+      if (watching && watching !== me.id && !members.some(x => x.id === watching && x.sharing)) { resetIncoming(); watching = null; }
+      autoWatch();
+      renderPeople();
+      break;
+    case 'share-ended':
+      if (m.id === watching) { resetIncoming(); watching = null; autoWatch(); renderPeople(); }
+      break;
+    case 'signal':
+      onSignal(m.from, m.data);
+      break;
+    case 'react':
+      showReaction(m.name, m.kind);
+      break;
   }
-  $('mobileHint').classList.toggle('hide', canShare);
-  $('controls').classList.remove('hide');
-  showControls();
 }
-fetch('/info').then(r => r.json()).then(i => { if (i.publicUrl) roomUrl = i.publicUrl + '/'; }).catch(() => {});
-function copyLink() {
-  navigator.clipboard.writeText(roomUrl).then(() => toast('Link copiado: ' + roomUrl), () => toast(roomUrl));
+
+// ---------- listas de pessoas ----------
+function personItem(p, clickable) {
+  const li = document.createElement('li');
+  li.className = 'person' + (clickable ? ' clickable' : '') + (p.id === watching ? ' active' : '');
+  li.append(avatar(p.name, p.sharing ? 'live' : 'on'));
+  const info = document.createElement('div'); info.className = 'info';
+  const nm = document.createElement('div'); nm.className = 'name';
+  nm.append(document.createTextNode(p.name));
+  if (p.id === hostId) { const c = svgIcon('i-crown'); c.setAttribute('aria-label', 'Criou a sala'); nm.append(c); }
+  if (p.id === me.id) { const b = document.createElement('span'); b.className = 'badge'; b.textContent = 'VOCÊ'; nm.append(b); }
+  const sub = document.createElement('div'); sub.className = 'sub';
+  sub.textContent = p.sharing
+    ? (p.id === watching ? (p.id === me.id ? 'Vendo a sua tela' : 'Assistindo agora') : (p.id === me.id ? 'Transmitindo' : 'Clique para assistir'))
+    : (p.id === me.id ? 'Você' : 'Conectado');
+  info.append(nm, sub); li.append(info);
+  if (p.sharing && p.id === watching) { const e = svgIcon('i-eye'); e.classList.add('watch-ic'); li.append(e); }
+  if (clickable) li.onclick = () => watch(p.id);
+  return li;
 }
-$('copy').onclick = copyLink;
-$('copyBig').onclick = copyLink;
+function renderPeople() {
+  const sharing = members.filter(p => p.sharing), others = members.filter(p => !p.sharing);
+  $('sharingCount').textContent = sharing.length; $('othersCount').textContent = others.length;
+  $('peopleCount').textContent = members.length;
+  $('sharingList').replaceChildren(...(sharing.length ? sharing.map(p => personItem(p, true)) : [Object.assign(document.createElement('li'), { className: 'empty-list', textContent: 'Ninguém por enquanto' })]));
+  $('memberList').replaceChildren(...others.map(p => personItem(p, false)));
+  $('shareBtn').classList.toggle('hide', !canShare || !!myStream);
+  $('stopBtn').classList.toggle('hide', !myStream);
+}
 
 // =====================================================================
 // ASSISTIR
 // =====================================================================
-let ves = null, vid = null, pc = null, pending = [];
-let relay = false, relaySession = 0, fallbackTimer = null;
-
-function startViewer() {
-  ves = new EventSource('/events?role=viewer');
-  ves.onerror = () => status('Sem conexão com o servidor. Tentando novamente…');
-  ves.onmessage = (e) => onViewerMsg(JSON.parse(e.data));
+function showEmpty() {
+  stageMsg('Ninguém está transmitindo', 'Quando alguém compartilhar a tela, ela aparece aqui. Você também pode começar.', false, canShare);
+  $('nameTag').classList.add('hide');
 }
-function stopViewer() {
-  if (ves) { ves.close(); ves = null; }
-  resetViewer();
+function stageMsg(title, text, spinning, showShare) {
+  $('stageMsg').classList.remove('hide');
+  $('stageTitle').textContent = title; $('stageText').textContent = text;
+  $('stageSpin').classList.toggle('hide', !spinning); $('stageIcon').classList.toggle('hide', spinning);
+  $('stageShare').classList.toggle('hide', !showShare || !canShare || !!myStream);
+}
+function hideStageMsg() { $('stageMsg').classList.add('hide'); }
+function setNameTag(text) {
+  $('nameTag').classList.toggle('hide', !text);
+  $('nameTag').querySelector('span').textContent = text || '';
+}
+
+// escolhe automaticamente alguém para assistir quando não estou vendo ninguém
+function autoWatch() {
+  const other = members.find(x => x.sharing && x.id !== me.id);
+  // vendo a própria tela e alguém começou a transmitir: passa a ver essa pessoa
+  if (watching === me.id && myStream && !other) return;
+  if (watching && watching !== me.id && members.some(x => x.id === watching && x.sharing)) return;
+  if (other) watch(other.id);
+  else if (myStream) watch(me.id);
+  else { watching = null; showEmpty(); }
+}
+
+function watch(id) {
+  if (id === watching) return;
+  resetIncoming();
+  watching = id;
+  const p = members.find(x => x.id === id);
+  if (id === me.id) {
+    video.srcObject = myStream; video.muted = true; video.play().catch(() => {});
+    hideStageMsg(); setNameTag('Você está transmitindo');
+  } else {
+    stageMsg(`Conectando à tela de ${p ? p.name : 'alguém'}…`, 'Só um instante.', true, false);
+    setNameTag(p ? p.name : '');
+    signal(id, { kind: 'watch' });
+    armFallback(15000);
+  }
+  renderPeople();
+}
+
+function resetIncoming() {
+  clearTimeout(fallbackTimer);
+  if (watching && watching !== me.id && members.some(x => x.id === watching)) signal(watching, { kind: 'unwatch' });
+  if (inPc) { inPc.close(); inPc = null; }
+  inPending = [];
+  stopRelay();
+  video.srcObject = null;
+  $('soundBtn').classList.add('hide');
+  $('nameTag').classList.add('hide');
 }
 
 function armFallback(ms) {
   clearTimeout(fallbackTimer);
-  fallbackTimer = setTimeout(() => { if (live && !relay && pc?.connectionState !== 'connected') startRelay(); }, ms);
+  fallbackTimer = setTimeout(() => { if (watching && watching !== me.id && !relay && inPc?.connectionState !== 'connected') startRelay(); }, ms);
 }
 
-async function onViewerMsg(msg) {
-  switch (msg.type) {
-    case 'hello':
-      vid = msg.id;
-      if (relay) { relay = false; stopRelay(); }
+async function onSignal(from, d) {
+  switch (d.kind) {
+    // ---- eu transmito: alguém quer me assistir ----
+    case 'watch': if (myStream) startOut(from); break;
+    case 'unwatch': closeOut(from); break;
+    case 'answer': {
+      const p = outPeers.get(from); if (!p?.pc) return;
+      await p.pc.setRemoteDescription(d.sdp).catch(() => {});
+      for (const c of p.pending.splice(0)) await p.pc.addIceCandidate(c).catch(() => {});
       break;
-    case 'status':
-      live = msg.live; presenterName = msg.name || '';
-      $('presenter').textContent = live ? `${presenterName} está apresentando` : '';
-      $('presenter').classList.toggle('hide', !live);
-      document.title = live ? `${presenterName} — Transmissor de Tela` : 'Transmissor de Tela';
-      updateButtons();
-      if (!live) { resetViewer(); status('Ninguém está apresentando agora.', false); }
-      else if (!pc && !relay) { status(`Conectando à tela de ${presenterName}…`); armFallback(15000); }
+    }
+    case 'cand-s': {
+      const p = outPeers.get(from); if (!p?.pc) return;
+      if (p.pc.remoteDescription) await p.pc.addIceCandidate(d.candidate).catch(() => {}); else p.pending.push(d.candidate);
       break;
-    case 'sender-left':
-      resetViewer(); status('A apresentação terminou.', false);
+    }
+    case 'relay-on': {
+      const p = outPeers.get(from);
+      if (p) p.relay = true; else outPeers.set(from, { pc: null, pending: [], relay: true });
       break;
-    case 'signal': {
-      if (relay) return;
-      const { sdp, candidate } = msg.data;
-      if (sdp && sdp.type === 'offer') {
-        closePc();
-        const cfg = await getIce(); // candidatos que chegarem enquanto isso ficam em "pending"
-        if (relay) return;
-        pc = new RTCPeerConnection(cfg);
-        const myPc = pc;
-        pc.ontrack = (ev) => {
-          if (video.srcObject !== ev.streams[0]) video.srcObject = ev.streams[0];
-          video.play().catch(() => {});
-          $('sound').classList.toggle('hide', !ev.streams[0].getAudioTracks().length);
-        };
-        pc.onicecandidate = (ev) => ev.candidate && post('/signal', { from: vid, to: 'sender', data: { candidate: ev.candidate } });
-        pc.onconnectionstatechange = () => {
-          if (pc !== myPc) return;
-          if (pc.connectionState === 'connected') { clearTimeout(fallbackTimer); status(''); showMode(false); }
-          if (pc.connectionState === 'failed') startRelay();
-        };
-        armFallback(15000);
-        await pc.setRemoteDescription(sdp);
-        for (const c of pending.splice(0)) await pc.addIceCandidate(c).catch(() => {});
-        await pc.setLocalDescription(await pc.createAnswer());
-        post('/signal', { from: vid, to: 'sender', data: { sdp: pc.localDescription } });
-      } else if (candidate) {
-        if (pc && pc.remoteDescription) await pc.addIceCandidate(candidate).catch(() => {});
-        else pending.push(candidate);
-      }
+    }
+    // ---- eu assisto: quem transmite mandou a oferta ----
+    case 'offer': {
+      if (from !== watching || relay) return;
+      if (inPc) { inPc.close(); inPc = null; }
+      const cfg = await getIce();
+      if (from !== watching || relay) return;
+      const pc = new RTCPeerConnection(cfg); inPc = pc;
+      pc.ontrack = (ev) => {
+        if (inPc !== pc) return;
+        video.srcObject = ev.streams[0]; video.muted = !wantSound; video.play().catch(() => {});
+        $('soundBtn').classList.toggle('hide', !ev.streams[0].getAudioTracks().length);
+      };
+      pc.onicecandidate = (ev) => ev.candidate && signal(from, { kind: 'cand-s', candidate: ev.candidate });
+      pc.onconnectionstatechange = () => {
+        if (inPc !== pc) return;
+        if (pc.connectionState === 'connected') { clearTimeout(fallbackTimer); hideStageMsg(); }
+        if (pc.connectionState === 'failed') startRelay();
+      };
+      await pc.setRemoteDescription(d.sdp);
+      for (const c of inPending.splice(0)) await pc.addIceCandidate(c).catch(() => {});
+      await pc.setLocalDescription(await pc.createAnswer());
+      signal(from, { kind: 'answer', sdp: pc.localDescription });
+      break;
+    }
+    case 'cand-v': {
+      if (from !== watching) return;
+      if (inPc && inPc.remoteDescription) await inPc.addIceCandidate(d.candidate).catch(() => {}); else inPending.push(d.candidate);
       break;
     }
   }
 }
 
-function closePc() {
-  if (pc) { pc.close(); pc = null; }
-  pending = [];
-  if (mode === 'viewer') video.srcObject = null;
-}
-function resetViewer() {
-  clearTimeout(fallbackTimer);
-  closePc();
-  stopRelay();
-  relay = false;
-  $('modeTag').classList.add('hide');
-  $('sound').classList.add('hide');
-}
-
-// modo reserva: busca imagens pelo servidor quando a conexão direta falha
+// modo reserva: se a conexão direta e a ponte falharem, busca imagens pelo servidor
 async function startRelay() {
-  if (relay) return;
+  if (relay || !watching || watching === me.id) return;
   relay = true;
   clearTimeout(fallbackTimer);
-  closePc();
-  post('/relay', { id: vid });
-  status('Conexão direta indisponível. Usando modo reserva…');
+  if (inPc) { inPc.close(); inPc = null; }
+  const sharer = watching;
+  signal(sharer, { kind: 'relay-on' });
+  stageMsg('Conexão direta indisponível', 'Usando o modo reserva…', true, false);
   const session = ++relaySession;
   let seq = 0, lastUrl = null;
   while (relay && session === relaySession) {
     try {
-      const r = await fetch('/frame?after=' + seq, { cache: 'no-store' });
+      const r = await fetch(`/frame?room=${roomCode}&sharer=${sharer}&after=${seq}`, { cache: 'no-store' });
       if (session !== relaySession) break;
       if (r.status === 200) {
         seq = Number(r.headers.get('X-Seq')) || seq + 1;
         const url = URL.createObjectURL(await r.blob());
-        img.src = url;
-        if (lastUrl) URL.revokeObjectURL(lastUrl);
-        lastUrl = url;
-        if (img.classList.contains('hide')) { status(''); showMode(true); }
+        img.src = url; if (lastUrl) URL.revokeObjectURL(lastUrl); lastUrl = url;
+        if (img.classList.contains('hide')) { img.classList.remove('hide'); $('modeTag').classList.remove('hide'); hideStageMsg(); }
       }
-    } catch {
-      await new Promise(r => setTimeout(r, 1000));
-    }
+    } catch { await new Promise(r => setTimeout(r, 1000)); }
   }
 }
 function stopRelay() {
-  relaySession++;
-  img.classList.add('hide');
-  img.removeAttribute('src');
-  video.classList.remove('hide');
+  relaySession++; relay = false;
+  img.classList.add('hide'); img.removeAttribute('src');
+  $('modeTag').classList.add('hide');
 }
-function showMode(isRelay) {
-  img.classList.toggle('hide', !isRelay);
-  video.classList.toggle('hide', isRelay);
-  $('modeTag').classList.toggle('hide', !isRelay);
-  if (isRelay) $('sound').classList.add('hide');
-  showControls();
-}
-
-$('sound').onclick = () => {
-  video.muted = !video.muted;
-  $('sound').textContent = video.muted ? '🔇 Ativar som' : '🔊 Som ligado';
-  video.play().catch(() => {});
-};
-$('full').onclick = () => {
-  if (document.fullscreenElement) document.exitFullscreen();
-  else (document.documentElement.requestFullscreen?.() || video.webkitEnterFullscreen?.());
-};
 
 // =====================================================================
-// COMPARTILHAR
+// TRANSMITIR
 // =====================================================================
-let ses = null, sid = null, stream = null, relayCount = 0, quality = QUALITY.normal;
-const peers = new Map(); // espectador -> { pc, pending }
+function openPanel() { $('panelError').classList.add('hide'); $('panel').classList.remove('hide'); }
+$('shareBtn').onclick = openPanel;
+$('stageShare').onclick = openPanel;
+$('cancelBtn').onclick = () => $('panel').classList.add('hide');
+$('stopBtn').onclick = () => stopShare();
 
-try { $('name').value = localStorage.getItem('nome') || ''; } catch {}
-function openPanel() {
-  if (live) return toast(`${presenterName} está apresentando. Espere terminar.`);
-  $('panelError').classList.add('hide');
-  $('panel').classList.remove('hide');
-  $('name').focus();
-}
-$('share').onclick = openPanel;
-$('shareBig').onclick = openPanel;
-$('cancel').onclick = () => $('panel').classList.add('hide');
-function panelError(msg) { $('panelError').textContent = msg; $('panelError').classList.remove('hide'); }
-
-$('go').onclick = async () => {
-  const name = $('name').value.trim();
-  if (!name) return panelError('Digite seu nome.');
-  try { localStorage.setItem('nome', name); } catch {}
+$('goBtn').onclick = async () => {
   quality = QUALITY[$('quality').value];
+  let stream;
   try {
     stream = await navigator.mediaDevices.getDisplayMedia({
       video: { frameRate: { ideal: quality.fps, max: quality.fps }, width: { ideal: 1920 }, height: { ideal: 1080 } },
       audio: $('audio').checked,
     });
   } catch (e) {
-    return panelError(e.name === 'NotAllowedError' ? 'Compartilhamento cancelado.' : 'Não deu para capturar a tela: ' + e.message);
+    $('panelError').textContent = e.name === 'NotAllowedError' ? 'Compartilhamento cancelado.' : 'Não deu para capturar a tela: ' + e.message;
+    $('panelError').classList.remove('hide');
+    return;
   }
   $('panel').classList.add('hide');
+  myStream = stream;
   const vt = stream.getVideoTracks()[0];
   vt.contentHint = quality.hint;
-  vt.onended = () => stopSharing(); // botão "Parar de compartilhar" do navegador
-
-  // vira apresentador: sai do modo espectador e mostra a própria tela
-  stopViewer();
-  mode = 'sender';
-  video.srcObject = stream; video.muted = true; video.classList.remove('hide');
-  status('');
-  $('presenter').textContent = 'Você está apresentando';
-  $('presenter').classList.remove('hide');
-  updateButtons();
-
-  ses = new EventSource('/events?' + new URLSearchParams({ role: 'sender', name }));
-  ses.onmessage = (e) => onSenderMsg(JSON.parse(e.data));
+  vt.onended = () => stopShare(); // botão "Parar de compartilhar" do navegador
+  post('/share', { on: true });
+  if (!watching) watch(me.id);
+  renderPeople();
 };
-$('stop').onclick = () => stopSharing();
 
-function stopSharing(msg) {
-  if (mode !== 'sender') return;
-  if (ses) { ses.close(); ses = null; }
-  for (const id of [...peers.keys()]) closePeer(id);
-  if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
-  relayCount = 0; sid = null;
-  mode = 'viewer';
-  video.srcObject = null;
-  live = false;
-  updateButtons();
-  status('Conectando…');
-  startViewer();
-  if (msg) toast(msg);
+function stopShare(silent) {
+  if (!myStream) return;
+  myStream.getTracks().forEach(t => t.stop());
+  myStream = null;
+  closeAllOut();
+  if (!silent) post('/share', { on: false });
+  if (watching === me.id) { watching = null; video.srcObject = null; autoWatch(); }
+  renderPeople();
 }
 
-async function onSenderMsg(msg) {
-  switch (msg.type) {
-    case 'denied': stopSharing(msg.reason); break;
-    case 'hello':
-      sid = msg.id;
-      for (const id of [...peers.keys()]) closePeer(id);
-      break;
-    case 'viewer-joined': connectPeer(msg.id); break;
-    case 'viewer-left': closePeer(msg.id); break;
-    case 'viewers':
-      relayCount = msg.relay;
-      $('presenter').textContent = `Você está apresentando · ${msg.count} assistindo`;
-      break;
-    case 'replaced': stopSharing(`${msg.by} assumiu a apresentação.`); break;
-    case 'signal': {
-      const p = peers.get(msg.from);
-      if (!p) return;
-      const { sdp, candidate } = msg.data;
-      if (sdp) {
-        await p.pc.setRemoteDescription(sdp);
-        for (const c of p.pending.splice(0)) await p.pc.addIceCandidate(c).catch(() => {});
-      } else if (candidate) {
-        if (p.pc.remoteDescription) await p.pc.addIceCandidate(candidate).catch(() => {});
-        else p.pending.push(candidate);
-      }
-      break;
-    }
-  }
+async function startOut(viewerId) {
+  closeOut(viewerId);
+  const cfg = await getIce();
+  if (!myStream) return;
+  const pc = new RTCPeerConnection(cfg);
+  outPeers.set(viewerId, { pc, pending: [], relay: false });
+  for (const t of myStream.getTracks()) pc.addTrack(t, myStream);
+  pc.onicecandidate = (e) => e.candidate && signal(viewerId, { kind: 'cand-v', candidate: e.candidate });
+  pc.onconnectionstatechange = () => { if (pc.connectionState === 'connected') applyBitrate(pc); };
+  await pc.setLocalDescription(await pc.createOffer());
+  signal(viewerId, { kind: 'offer', sdp: pc.localDescription });
 }
-
-async function connectPeer(viewerId) {
-  if (!stream) return;
-  closePeer(viewerId);
-  const p = new RTCPeerConnection(await getIce());
-  if (!stream) return p.close();
-  peers.set(viewerId, { pc: p, pending: [] });
-  for (const t of stream.getTracks()) p.addTrack(t, stream);
-  p.onicecandidate = (e) => e.candidate && post('/signal', { from: sid, to: viewerId, data: { candidate: e.candidate } });
-  p.onconnectionstatechange = () => {
-    if (p.connectionState === 'connected') applyBitrate(p);
-    if (p.connectionState === 'failed') closePeer(viewerId);
-  };
-  await p.setLocalDescription(await p.createOffer());
-  post('/signal', { from: sid, to: viewerId, data: { sdp: p.localDescription } });
-}
-async function applyBitrate(p) {
-  for (const s of p.getSenders()) {
+async function applyBitrate(pc) {
+  for (const s of pc.getSenders()) {
     if (s.track?.kind !== 'video') continue;
     const params = s.getParameters();
     if (!params.encodings?.length) params.encodings = [{}];
@@ -381,59 +578,74 @@ async function applyBitrate(p) {
     await s.setParameters(params).catch(() => {});
   }
 }
-function closePeer(id) {
-  const p = peers.get(id);
-  if (p) { p.pc.close(); peers.delete(id); }
-}
+function closeOut(id) { const p = outPeers.get(id); if (p) { p.pc?.close(); outPeers.delete(id); } }
+function closeAllOut() { for (const id of [...outPeers.keys()]) closeOut(id); }
 
-// modo reserva do lado de quem apresenta: manda imagens JPEG pelo servidor.
-// O "relógio" roda num Worker para não ser freado quando a aba fica em segundo plano.
-const canvas = document.createElement('canvas');
-const ctx = canvas.getContext('2d');
-// até 3 quadros a caminho ao mesmo tempo, para não esperar a ida e volta ao servidor a cada foto
+// modo reserva de quem transmite: manda JPEG pelo servidor só se alguém precisar.
+// O relógio roda num Worker para não ser freado quando a aba fica em segundo plano.
+const canvas = document.createElement('canvas'), ctx = canvas.getContext('2d');
 let inFlight = 0, grabbing = false, frameNo = 0, imageCapture = null, captureTrack = null;
 const ticker = new Worker(URL.createObjectURL(new Blob(['setInterval(() => postMessage(0), 83)'])));
 ticker.onmessage = async () => {
-  if (mode !== 'sender' || !stream || !relayCount || grabbing || inFlight >= 3 || !sid) return;
+  if (!myStream || grabbing || inFlight >= 3 || !me.id || ![...outPeers.values()].some(p => p.relay)) return;
   grabbing = true;
   let blob;
   try {
-    const vt = stream.getVideoTracks()[0];
+    const vt = myStream.getVideoTracks()[0];
     let src;
     if ('ImageCapture' in window) {
       if (captureTrack !== vt) { imageCapture = new ImageCapture(vt); captureTrack = vt; }
       src = await imageCapture.grabFrame();
-    } else {
-      src = video;
-    }
+    } else src = video;
     const sw = src.width || src.videoWidth, sh = src.height || src.videoHeight;
-    if (!sw) return;
-    const scale = Math.min(1, 1280 / sw);
-    canvas.width = Math.round(sw * scale); canvas.height = Math.round(sh * scale);
-    ctx.drawImage(src, 0, 0, canvas.width, canvas.height);
+    if (sw) {
+      const scale = Math.min(1, 1280 / sw);
+      canvas.width = Math.round(sw * scale); canvas.height = Math.round(sh * scale);
+      ctx.drawImage(src, 0, 0, canvas.width, canvas.height);
+      blob = await new Promise(r => canvas.toBlob(r, 'image/jpeg', 0.65));
+    }
     src.close?.();
-    blob = await new Promise(r => canvas.toBlob(r, 'image/jpeg', 0.65));
   } catch {} finally { grabbing = false; }
   if (!blob) return;
   inFlight++;
-  fetch('/frame', { method: 'POST', headers: { 'X-Id': sid, 'X-Frame': String(++frameNo), 'Content-Type': 'image/jpeg' }, body: blob })
+  fetch(`/frame?room=${roomCode}`, { method: 'POST', headers: { 'X-Id': me.id, 'X-Frame': String(++frameNo), 'Content-Type': 'image/jpeg' }, body: blob })
     .catch(() => {}).finally(() => inFlight--);
 };
 
-// ---------- botões somem sozinhos enquanto assiste ----------
-let hideTimer;
-function showControls() {
-  $('controls').classList.remove('hidden');
-  clearTimeout(hideTimer);
-  hideTimer = setTimeout(() => {
-    const watching = mode === 'viewer' && $('overlay').classList.contains('hide');
-    if (watching && $('panel').classList.contains('hide')) $('controls').classList.add('hidden');
-  }, 3000);
+// =====================================================================
+// BARRA DE BAIXO
+// =====================================================================
+let lastReact = 0;
+document.querySelectorAll('.react').forEach(b => b.onclick = () => {
+  if (Date.now() - lastReact < 350) return;
+  lastReact = Date.now();
+  post('/react', { kind: b.dataset.kind });
+});
+function showReaction(name, kind) {
+  if (!REACT_ICON[kind]) return;
+  const f = document.createElement('div'); f.className = 'float';
+  f.style.left = (8 + Math.random() * 80) + '%';
+  const b = document.createElement('div'); b.className = 'bubble'; b.append(svgIcon(REACT_ICON[kind]));
+  const w = document.createElement('div'); w.className = 'who'; w.textContent = name;
+  f.append(b, w);
+  $('reactions').append(f);
+  setTimeout(() => f.remove(), 2700);
 }
-['mousemove', 'touchstart', 'click'].forEach(ev => document.addEventListener(ev, showControls));
-
-updateButtons();
-startViewer();
+$('soundBtn').onclick = () => {
+  wantSound = !wantSound;
+  video.muted = !wantSound; video.play().catch(() => {});
+  $('soundBtn').classList.toggle('on', wantSound);
+  $('soundBtn').title = wantSound ? 'Desativar som' : 'Ativar som';
+  $('soundBtn').querySelector('use').setAttribute('href', wantSound ? '#i-sound' : '#i-mute');
+};
+$('fullBtn').onclick = () => {
+  if (document.fullscreenElement) document.exitFullscreen();
+  else ($('stage').requestFullscreen?.() || video.webkitEnterFullscreen?.());
+};
+$('leaveBtn').onclick = () => leaveRoom('');
+$('copyCode').onclick = () => copy(roomCode, 'Código copiado: ' + roomCode);
+$('copyInvite').onclick = () => copy(inviteLink(), 'Link do convite copiado');
+$('codeChip').onclick = () => copy(inviteLink(), 'Link do convite copiado');
 </script>
 </body>
 </html>
