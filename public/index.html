@@ -192,7 +192,8 @@ function toast(msg) { $('toast').textContent = msg; $('toast').classList.remove(
 function copy(text, ok) { navigator.clipboard.writeText(text).then(() => toast(ok), () => toast(text)); }
 function normCode(c) { const s = String(c || '').toUpperCase().replace(/[^A-Z0-9]/g, ''); return s.length === 8 ? s.slice(0, 4) + '-' + s.slice(4) : null; }
 let baseUrl = location.origin;
-fetch('/info').then(r => r.json()).then(i => { if (i.publicUrl) baseUrl = i.publicUrl; }).catch(() => {});
+let maxViewers = 10; // limite de pessoas assistindo cada apresentador (vem do servidor)
+fetch('/info').then(r => r.json()).then(i => { if (i.publicUrl) baseUrl = i.publicUrl; if (i.maxViewers) maxViewers = i.maxViewers; }).catch(() => {});
 const inviteLink = () => `${baseUrl}/sala/${roomCode}`;
 
 // configuração de conexão (STUN + ponte TURN), vinda do servidor
@@ -216,7 +217,7 @@ const me = { id: null, name: '' };
 let members = [], hostId = null;
 let watching = null;                       // id de quem estou assistindo
 let inPc = null, inPending = [];           // conexão de entrada (quem assisto)
-let relay = false, relaySession = 0, fallbackTimer = null, wantSound = false;
+let relay = false, relaySession = 0, fallbackTimer = null, fullTimer = null, wantSound = false;
 let myStream = null, quality = QUALITY.normal;
 const outPeers = new Map();                // quem me assiste: id -> { pc, pending, relay }
 
@@ -466,7 +467,8 @@ function showSelfStage() {
   video.srcObject = null;
   const n = [...outPeers.values()].filter(p => p.pc || p.relay).length;
   stageMsg('Você está transmitindo',
-    n ? `${n} ${n === 1 ? 'pessoa está' : 'pessoas estão'} assistindo a sua tela.` : 'Ninguém assistindo ainda. Mande o link do convite para a turma.',
+    n ? `${n} de ${maxViewers} ${n === 1 ? 'pessoa está' : 'pessoas estão'} assistindo a sua tela${n >= maxViewers ? ' (lotado: quem chegar agora espera uma vaga)' : ''}.`
+      : `Ninguém assistindo ainda. Até ${maxViewers} pessoas podem assistir você ao mesmo tempo.`,
     false, false);
   $('stagePreview').classList.remove('hide');
   setNameTag('');
@@ -507,6 +509,7 @@ function watch(id) {
 
 function resetIncoming() {
   clearTimeout(fallbackTimer);
+  clearTimeout(fullTimer);
   if (watching && watching !== me.id && members.some(x => x.id === watching)) signal(watching, { kind: 'unwatch' });
   if (inPc) { inPc.close(); inPc = null; }
   inPending = [];
@@ -525,7 +528,14 @@ function armFallback(ms) {
 async function onSignal(from, d) {
   switch (d.kind) {
     // ---- eu transmito: alguém quer me assistir ----
-    case 'watch': if (myStream) startOut(from); break;
+    case 'watch': {
+      if (!myStream) return;
+      // limite de espectadores: protege a qualidade de quem já assiste e o uso da ponte
+      const watchingNow = [...outPeers.keys()].filter(id => id !== from).length;
+      if (watchingNow >= maxViewers) { signal(from, { kind: 'full', max: maxViewers }); return; }
+      startOut(from);
+      break;
+    }
     case 'unwatch': closeOut(from); break;
     case 'answer': {
       const p = outPeers.get(from); if (!p?.pc) return;
@@ -540,7 +550,19 @@ async function onSignal(from, d) {
     }
     case 'relay-on': {
       const p = outPeers.get(from);
-      if (p) p.relay = true; else outPeers.set(from, { pc: null, pending: [], relay: true });
+      if (p) p.relay = true; // só quem já ocupou uma vaga pode usar o modo reserva
+      break;
+    }
+    // ---- eu assisto: a transmissão escolhida está cheia ----
+    case 'full': {
+      if (from !== watching) return;
+      clearTimeout(fallbackTimer);
+      const p = members.find(x => x.id === from);
+      stageMsg(`A transmissão de ${p ? p.name : 'alguém'} está cheia`,
+        `Já tem ${d.max} pessoas assistindo, o limite para manter a qualidade. Você entra sozinho assim que abrir uma vaga, ou escolha outra pessoa na lista.`,
+        true, false);
+      clearTimeout(fullTimer);
+      fullTimer = setTimeout(() => { if (watching === from && !inPc && !relay) signal(from, { kind: 'watch' }); }, 8000);
       break;
     }
     // ---- eu assisto: quem transmite mandou a oferta ----
