@@ -522,6 +522,13 @@ server.on('error', (e) => {
   process.exit(1);
 });
 
+// No Render grátis o serviço dorme após 15 min sem acessos. O próprio servidor
+// visita o link público a cada 10 min para continuar acordado.
+if (process.env.RENDER_EXTERNAL_URL) {
+  const ping = () => fetch(process.env.RENDER_EXTERNAL_URL.replace(/\/+$/, '') + '/info', { signal: AbortSignal.timeout(30000) }).catch(() => {});
+  setInterval(ping, 10 * 60 * 1000).unref();
+}
+
 server.listen(PORT, '0.0.0.0', () => {
   if (HOSTED) return console.log(`KOMAND Live no ar (modo hospedado) na porta ${PORT}. Link: ${publicUrl || '(defina PUBLIC_URL)'}`);
   console.log('\n  KOMAND Live rodando!\n');
