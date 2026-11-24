@@ -50,8 +50,133 @@ async function getIceServers() {
   return servers;
 }
 
+// ---------- login com Discord (só quem tem o cargo KOMAND Live no servidor entra) ----------
+// Variáveis no Render: DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET, DISCORD_GUILD_ID (ID do servidor),
+// DISCORD_ROLE_ID (ID do cargo) e SESSION_SECRET (texto aleatório que protege o login).
+const cleanEnv = (v) => String(v || '').replace(/[\s"']/g, '');
+const DISCORD = {
+  clientId: cleanEnv(process.env.DISCORD_CLIENT_ID),
+  secret: cleanEnv(process.env.DISCORD_CLIENT_SECRET),
+  guild: cleanEnv(process.env.DISCORD_GUILD_ID),
+  role: cleanEnv(process.env.DISCORD_ROLE_ID),
+};
+const SESSION_SECRET = String(process.env.SESSION_SECRET || '').trim() || (HOSTED ? '' : 'segredo-local-de-teste');
+const AUTH_READY = !!(DISCORD.clientId && DISCORD.secret && DISCORD.guild && DISCORD.role && SESSION_SECRET);
+// Login de teste, só no PC (nunca no Render): DEV_LOGIN=1 libera /auth/dev?name=Fulano
+const DEV_LOGIN = !HOSTED && process.env.DEV_LOGIN === '1';
+const SESSION_DAYS = 30; // fica conectado por 30 dias (a autorização do Discord é renovada sozinha)
+
+// a sessão vai num cookie criptografado (AES-256-GCM): ninguém consegue ler nem forjar
+const SESSION_KEY = crypto.createHash('sha256').update('komand-live:' + SESSION_SECRET).digest();
+function seal(obj) {
+  const iv = crypto.randomBytes(12);
+  const c = crypto.createCipheriv('aes-256-gcm', SESSION_KEY, iv);
+  const data = Buffer.concat([c.update(JSON.stringify(obj)), c.final()]);
+  return Buffer.concat([iv, c.getAuthTag(), data]).toString('base64url');
+}
+function unseal(s) {
+  try {
+    const b = Buffer.from(String(s || ''), 'base64url');
+    const d = crypto.createDecipheriv('aes-256-gcm', SESSION_KEY, b.subarray(0, 12));
+    d.setAuthTag(b.subarray(12, 28));
+    return JSON.parse(Buffer.concat([d.update(b.subarray(28)), d.final()]));
+  } catch { return null; }
+}
+function readCookies(req) {
+  const out = {};
+  for (const part of String(req.headers.cookie || '').split(';')) {
+    const i = part.indexOf('=');
+    if (i > 0) out[part.slice(0, i).trim()] = decodeURIComponent(part.slice(i + 1).trim());
+  }
+  return out;
+}
+function cookie(name, value, maxAgeSec) {
+  const secure = HOSTED ? '; Secure' : '';
+  return `${name}=${encodeURIComponent(value)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAgeSec}${secure}`;
+}
+function siteOrigin(req) {
+  if (publicUrl) return publicUrl.replace(/\/+$/, '');
+  const proto = String(req.headers['x-forwarded-proto'] || 'http').split(',')[0];
+  return `${proto}://${req.headers.host}`;
+}
+function redirect(res, location, cookies = []) {
+  res.writeHead(302, { Location: location, 'Cache-Control': 'no-store', ...(cookies.length ? { 'Set-Cookie': cookies } : {}) });
+  res.end();
+}
+const safeNext = (n) => (typeof n === 'string' && /^\/(?!\/)[\w\-/]*$/.test(n) ? n : '/');
+
+// pergunta ao Discord se a pessoa está no servidor e tem o cargo
+async function discordMember(token) {
+  const r = await fetch(`https://discord.com/api/v10/users/@me/guilds/${DISCORD.guild}/member`, { headers: { Authorization: `Bearer ${token}` } });
+  if (r.status === 404) return { status: 'fora-do-servidor' };
+  if (r.status === 401) return { status: 'expirou' };
+  if (!r.ok) throw new Error(`Discord respondeu ${r.status}`);
+  const m = await r.json();
+  return { status: (m.roles || []).includes(DISCORD.role) ? 'ok' : 'sem-cargo', member: m };
+}
+function avatarUrl(m) {
+  const u = m.user || {};
+  if (m.avatar) return `https://cdn.discordapp.com/guilds/${DISCORD.guild}/users/${u.id}/avatars/${m.avatar}.png?size=64`;
+  if (u.avatar) return `https://cdn.discordapp.com/avatars/${u.id}/${u.avatar}.png?size=64`;
+  return null;
+}
+
+// renovação da autorização do Discord (dura 7 dias; com o "refresh token" vira 30 dias de sessão)
+const tokenStore = new Map();  // uid -> tokens mais novos { tok, rt, tokExp } (evita usar um código já trocado)
+const refreshing = new Map();  // uid -> renovação em andamento (duas abas ao mesmo tempo não brigam)
+class RefreshRejected extends Error {}
+function refreshTokens(uid, rt) {
+  if (refreshing.has(uid)) return refreshing.get(uid);
+  const job = (async () => {
+    const r = await fetch('https://discord.com/api/v10/oauth2/token', {
+      method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ client_id: DISCORD.clientId, client_secret: DISCORD.secret, grant_type: 'refresh_token', refresh_token: rt }),
+    });
+    if (r.status === 400 || r.status === 401) throw new RefreshRejected('autorização removida ou vencida');
+    if (!r.ok) throw new Error('Discord respondeu ' + r.status);
+    const t = await r.json();
+    const v = { tok: t.access_token, rt: t.refresh_token, tokExp: Date.now() + (Number(t.expires_in) || 604800) * 1000 };
+    tokenStore.set(uid, v);
+    return v;
+  })();
+  refreshing.set(uid, job);
+  job.finally(() => refreshing.delete(uid)).catch(() => {});
+  return job;
+}
+
+// quem está logado? (confere de novo no Discord a cada 5 minutos: tirou o cargo, perdeu o acesso)
+const memberCheck = new Map(); // uid -> { ok, at }
+async function currentUser(req, res) {
+  if (!AUTH_READY && !DEV_LOGIN) return null;
+  const s = unseal(readCookies(req).komand_sess);
+  if (!s || !s.uid || s.exp < Date.now()) return null;
+  if (s.dev) return DEV_LOGIN ? s : null;
+  let updated = false;
+  const known = tokenStore.get(s.uid);
+  if (known && known.tokExp > (s.tokExp || 0)) { Object.assign(s, known); updated = true; }
+  const saveCookie = () => {
+    if (updated && res && !res.headersSent) res.setHeader('Set-Cookie', cookie('komand_sess', seal(s), Math.max(1, Math.floor((s.exp - Date.now()) / 1000))));
+  };
+  const cached = memberCheck.get(s.uid);
+  if (cached && Date.now() - cached.at < 5 * 60e3) { saveCookie(); return cached.ok ? s : null; }
+  try {
+    // autorização perto de vencer: renova antes de perguntar ao Discord
+    if (s.rt && (s.tokExp || 0) < Date.now() + 24 * 3600e3) { Object.assign(s, await refreshTokens(s.uid, s.rt)); updated = true; }
+    let r = await discordMember(s.tok);
+    if (r.status === 'expirou' && s.rt) { Object.assign(s, await refreshTokens(s.uid, s.rt)); updated = true; r = await discordMember(s.tok); }
+    memberCheck.set(s.uid, { ok: r.status === 'ok', at: Date.now() });
+    saveCookie();
+    return r.status === 'ok' ? s : null;
+  } catch (e) {
+    if (e instanceof RefreshRejected) { memberCheck.set(s.uid, { ok: false, at: Date.now() }); return null; } // removeu a autorização no Discord
+    log('Não consegui conferir no Discord: ' + e.message);
+    saveCookie();
+    return s; // Discord instável: mantém quem já estava logado
+  }
+}
+
 // ---------- salas ----------
-// sala: { code, hostId, members: Map(id -> { id, name, res, sharing }), frames: Map(sharerId -> quadro), emptySince }
+// sala: { code, hostId, members: Map(id -> { id, name, avatar, res, sharing }), frames: Map(sharerId -> quadro), emptySince }
 const rooms = new Map();
 const MAX_ROOMS = 500, MAX_MEMBERS = 50;
 const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // sem 0/O e 1/I, que confundem
@@ -81,7 +206,7 @@ function broadcast(room, msg) {
   for (const id of room.members.keys()) send(room, id, msg);
 }
 function pushMembers(room) {
-  const members = [...room.members.values()].map((m) => ({ id: m.id, name: m.name, sharing: m.sharing }));
+  const members = [...room.members.values()].map((m) => ({ id: m.id, name: m.name, avatar: m.avatar, sharing: m.sharing }));
   broadcast(room, { type: 'members', members, hostId: room.hostId });
 }
 
@@ -156,6 +281,72 @@ const server = http.createServer(async (req, res) => {
       // MAX_VIEWERS: quantas pessoas podem assistir cada apresentador (protege a qualidade e o uso da ponte TURN)
       return json(res, 200, { ok: true, publicUrl, internet: INTERNET || HOSTED, rooms: rooms.size, maxViewers: Number(process.env.MAX_VIEWERS) || 10 });
     }
+
+    // ----- login com Discord -----
+    if (req.method === 'GET' && p === '/auth/discord') {
+      if (!AUTH_READY) return redirect(res, '/?erro=nao-configurado');
+      const state = crypto.randomBytes(16).toString('hex');
+      const next = safeNext(url.searchParams.get('next'));
+      const q = new URLSearchParams({
+        client_id: DISCORD.clientId, response_type: 'code', scope: 'identify guilds.members.read',
+        redirect_uri: siteOrigin(req) + '/auth/discord/callback', state, prompt: 'none',
+      });
+      return redirect(res, 'https://discord.com/oauth2/authorize?' + q, [cookie('komand_oauth', seal({ state, next, exp: Date.now() + 10 * 60e3 }), 600)]);
+    }
+    if (req.method === 'GET' && p === '/auth/discord/callback') {
+      const o = unseal(readCookies(req).komand_oauth);
+      const clear = cookie('komand_oauth', '', 0);
+      if (!AUTH_READY || !o || o.exp < Date.now() || o.state !== url.searchParams.get('state')) return redirect(res, '/?erro=falhou', [clear]);
+      if (url.searchParams.get('error') || !url.searchParams.get('code')) return redirect(res, '/?erro=cancelado', [clear]);
+      try {
+        const tr = await fetch('https://discord.com/api/v10/oauth2/token', {
+          method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({
+            client_id: DISCORD.clientId, client_secret: DISCORD.secret, grant_type: 'authorization_code',
+            code: url.searchParams.get('code'), redirect_uri: siteOrigin(req) + '/auth/discord/callback',
+          }),
+        });
+        if (!tr.ok) throw new Error('token ' + tr.status);
+        const t = await tr.json();
+        const r = await discordMember(t.access_token);
+        if (r.status !== 'ok') { log(`Login recusado (${r.status})`); return redirect(res, '/?erro=' + r.status, [clear]); }
+        const m = r.member, u = m.user;
+        const maxAge = SESSION_DAYS * 86400;
+        const sess = {
+          uid: u.id, name: cleanName(m.nick || u.global_name || u.username), avatar: avatarUrl(m),
+          tok: t.access_token, rt: t.refresh_token, tokExp: Date.now() + (Number(t.expires_in) || 604800) * 1000,
+          exp: Date.now() + maxAge * 1000,
+        };
+        tokenStore.set(u.id, { tok: sess.tok, rt: sess.rt, tokExp: sess.tokExp });
+        memberCheck.set(u.id, { ok: true, at: Date.now() });
+        log(`${sess.name} entrou com Discord`);
+        return redirect(res, o.next || '/', [clear, cookie('komand_sess', seal(sess), maxAge)]);
+      } catch (e) {
+        log('Falha no login com Discord: ' + e.message);
+        return redirect(res, '/?erro=falhou', [clear]);
+      }
+    }
+    if (req.method === 'GET' && p === '/auth/logout') return redirect(res, '/', [cookie('komand_sess', '', 0)]);
+    if (req.method === 'GET' && p === '/auth/dev' && DEV_LOGIN) { // só para testes no PC
+      const sess = { uid: 'dev-' + crypto.randomBytes(4).toString('hex'), name: cleanName(url.searchParams.get('name')), avatar: null, dev: true, exp: Date.now() + 86400e3 };
+      return redirect(res, safeNext(url.searchParams.get('next')), [cookie('komand_sess', seal(sess), 86400)]);
+    }
+
+    // ----- daqui para baixo, só quem fez login (e tem o cargo) -----
+    const user = await currentUser(req, res);
+    if (req.method === 'GET' && p === '/api/me') {
+      if (!user) return json(res, 401, { login: AUTH_READY || DEV_LOGIN });
+      return json(res, 200, { name: user.name, avatar: user.avatar });
+    }
+    if (!user) {
+      if (p === '/events') {
+        res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store' });
+        res.write(`data: ${JSON.stringify({ type: 'error', reason: 'Seu acesso expirou ou foi removido. Entre com o Discord de novo.', login: true })}\n\n`);
+        return res.end();
+      }
+      return json(res, 401, { error: 'login' });
+    }
+
     if (req.method === 'GET' && p === '/ice') {
       const iceServers = await getIceServers();
       return json(res, 200, { iceServers, turn: iceServers.length > 1 });
@@ -187,8 +378,8 @@ const server = http.createServer(async (req, res) => {
       if (room.members.size >= MAX_MEMBERS) return fail('A sala está cheia.');
 
       const id = crypto.randomUUID();
-      const name = cleanName(url.searchParams.get('name'));
-      room.members.set(id, { id, name, res, sharing: false });
+      const name = user.name; // nome vem do Discord (não dá para se passar por outra pessoa)
+      room.members.set(id, { id, name, avatar: user.avatar || null, res, sharing: false });
       if (!room.hostId || !room.members.has(room.hostId)) room.hostId = id;
       res.write(`data: ${JSON.stringify({ type: 'hello', id, code: room.code })}\n\n`);
       pushMembers(room);
