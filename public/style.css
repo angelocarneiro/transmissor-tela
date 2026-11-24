@@ -69,6 +69,29 @@ svg { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor; s
     repeating-linear-gradient(0deg, transparent 0 39px, rgba(255,255,255,.025) 39px 40px),
     repeating-linear-gradient(90deg, transparent 0 39px, rgba(255,255,255,.025) 39px 40px);
 }
+/* emblema K/TV interativo (inclina com o mouse, flutua, brilha) */
+.emblem { width: clamp(150px, 15vw, 210px); aspect-ratio: 560 / 483; margin: 0 0 14px -12px; perspective: 700px; }
+.emblem-float { width: 100%; height: 100%; animation: emblem-float 6s ease-in-out infinite; }
+@keyframes emblem-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
+.emblem-tilt {
+  position: relative; width: 100%; height: 100%; transform-style: preserve-3d; will-change: transform;
+  transform: translate3d(var(--tx, 0px), var(--ty, 0px), 0) rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg));
+}
+.emblem-tilt img {
+  display: block; width: 100%; height: 100%; user-select: none; -webkit-user-drag: none;
+  /* bordas se dissolvem no fundo carvão, sem "quadrado" aparecendo */
+  -webkit-mask-image: radial-gradient(closest-side, #000 58%, transparent 100%);
+  mask-image: radial-gradient(closest-side, #000 58%, transparent 100%);
+}
+.emblem-glow {
+  position: absolute; inset: -8%; pointer-events: none; border-radius: 50%;
+  background: radial-gradient(circle at var(--gx, 50%) var(--gy, 50%), rgba(255, 106, 26, .38), transparent 55%);
+  opacity: var(--glow, .2); mix-blend-mode: screen; filter: blur(16px);
+}
+@media (prefers-reduced-motion: reduce) {
+  .emblem-float { animation: none; }
+}
+
 .brand-line { display: flex; align-items: center; gap: 14px; margin-bottom: 22px; }
 .brand-line .tag { color: var(--mut); font-size: 13px; padding-left: 14px; border-left: 1px solid var(--line-2); }
 .hero h1 { font-size: clamp(38px, 5.2vw, 60px); line-height: 1.02; }

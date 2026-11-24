@@ -39,6 +39,14 @@
 <!-- ================= ENTRADA ================= -->
 <main id="landing" class="landing">
   <section class="hero">
+    <div id="emblem" class="emblem" aria-hidden="true">
+      <div class="emblem-float">
+        <div id="emblemTilt" class="emblem-tilt">
+          <img src="/komand-emblema.jpg" alt="" width="560" height="483" decoding="async">
+          <span class="emblem-glow"></span>
+        </div>
+      </div>
+    </div>
     <div class="brand-line"><span class="logo">KOMAND <em>live</em></span><span class="tag">tela ao vivo, ponto a ponto</span></div>
     <h1>Sua tela, ao vivo,<br><span class="hl">direto para a sala.</span></h1>
     <p class="lead">Crie uma sala, mande o código para a turma e transmita a tela pelo navegador. Sem instalar nada, sem cadastro.</p>
@@ -263,6 +271,43 @@ $('joinBtn').onclick = async () => {
 };
 $('nick').addEventListener('keydown', (e) => { if (e.key === 'Enter') (invited ? $('joinBtn') : $('createBtn')).click(); });
 $('codeInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('joinBtn').click(); });
+
+// ---------- emblema K/TV: acompanha o mouse com inclinação 3D e brilho ----------
+(function emblemFx() {
+  const box = $('emblem'), tilt = $('emblemTilt');
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)');
+  const mouse = matchMedia('(hover: hover) and (pointer: fine)'); // touchscreen fica só com a flutuação (CSS)
+  const MAX_ROT = 9, MAX_MOVE = 5, REACH = 140, EASE = 0.08;   // amplitude discreta, entrada suave
+  const REST = { rx: 0, ry: 0, tx: 0, ty: 0, glow: 0.2, gx: 50, gy: 50 };
+  const cur = { ...REST }, tgt = { ...REST };
+  let raf = null;
+  function frame() {
+    let moving = false;
+    for (const k in cur) { const d = tgt[k] - cur[k]; cur[k] += d * EASE; if (Math.abs(d) > 0.005) moving = true; }
+    const s = tilt.style;
+    s.setProperty('--rx', cur.rx.toFixed(2) + 'deg'); s.setProperty('--ry', cur.ry.toFixed(2) + 'deg');
+    s.setProperty('--tx', cur.tx.toFixed(2) + 'px');  s.setProperty('--ty', cur.ty.toFixed(2) + 'px');
+    s.setProperty('--glow', cur.glow.toFixed(3));
+    s.setProperty('--gx', cur.gx.toFixed(1) + '%');   s.setProperty('--gy', cur.gy.toFixed(1) + '%');
+    raf = moving ? requestAnimationFrame(frame) : null;
+  }
+  const kick = () => { if (!raf) raf = requestAnimationFrame(frame); };
+  const rest = () => { Object.assign(tgt, REST); kick(); };          // volta devagar à posição inicial
+  window.addEventListener('pointermove', (e) => {
+    if (e.pointerType !== 'mouse' || !mouse.matches || reduce.matches || $('landing').classList.contains('hide')) return;
+    const r = box.getBoundingClientRect();
+    const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+    const near = e.clientX > r.left - REACH && e.clientX < r.right + REACH && e.clientY > r.top - REACH && e.clientY < r.bottom + REACH;
+    if (!near) return rest();
+    const nx = Math.max(-1, Math.min(1, (e.clientX - cx) / (r.width / 2 + REACH)));
+    const ny = Math.max(-1, Math.min(1, (e.clientY - cy) / (r.height / 2 + REACH)));
+    Object.assign(tgt, { ry: nx * MAX_ROT, rx: -ny * MAX_ROT, tx: nx * MAX_MOVE, ty: ny * MAX_MOVE, glow: 0.8, gx: 50 + nx * 35, gy: 50 + ny * 35 });
+    kick();
+  }, { passive: true });
+  document.documentElement.addEventListener('pointerleave', rest);
+  window.addEventListener('blur', rest);
+  reduce.addEventListener?.('change', rest);
+})();
 
 // =====================================================================
 // SALA
