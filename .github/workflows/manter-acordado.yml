@@ -1,0 +1,16 @@
+# Visita o site a cada 10 minutos para o Render não colocar ele para "dormir"
+# (assim ninguém vê a tela de "acordando" do Render).
+name: Manter o site acordado
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+jobs:
+  visitar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Visitar o site
+        run: curl -fsS --max-time 90 https://transmissor-tela.onrender.com/info > /dev/null || true
