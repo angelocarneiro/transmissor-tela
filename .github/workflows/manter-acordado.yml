@@ -13,4 +13,5 @@ jobs:
     timeout-minutes: 3
     steps:
       - name: Visitar o site
-        run: curl -fsS --max-time 90 https://transmissor-tela.onrender.com/info > /dev/null || true
+        run: curl -fsS --max-time 90 https://komand-live.onrender.com/info > /dev/null || true
+      
