@@ -141,6 +141,16 @@ const server = http.createServer(async (req, res) => {
       return serveFile(res, 'index.html', 'text/html; charset=utf-8');
     }
     if (req.method === 'GET' && p === '/style.css') return serveFile(res, 'style.css', 'text/css; charset=utf-8');
+    // imagens da pasta public (só o nome do arquivo, sem subpastas)
+    const imgMatch = p.match(/^\/([a-z0-9-]+\.(png|jpg|svg|webp))$/i);
+    if (req.method === 'GET' && imgMatch) {
+      const types = { png: 'image/png', jpg: 'image/jpeg', svg: 'image/svg+xml', webp: 'image/webp' };
+      return fs.readFile(path.join(PUBLIC, imgMatch[1]), (err, data) => {
+        if (err) { res.writeHead(404); return res.end(); }
+        res.writeHead(200, { 'Content-Type': types[imgMatch[2].toLowerCase()], 'Cache-Control': 'public, max-age=86400' });
+        res.end(data);
+      });
+    }
 
     if (req.method === 'GET' && p === '/info') {
       return json(res, 200, { ok: true, publicUrl, internet: INTERNET || HOSTED, rooms: rooms.size });
