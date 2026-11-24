@@ -123,9 +123,17 @@ function memberOf(body) {
 
 const REACTIONS = new Set(['like', 'heart', 'fire']);
 
+// Se REDIRECT_TO estiver definido, este servidor só manda as pessoas para o endereço novo
+// (usado no link antigo, para os links já compartilhados continuarem funcionando).
+const REDIRECT_TO = String(process.env.REDIRECT_TO || '').trim().replace(/\/+$/, '');
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x');
   const p = url.pathname;
+  if (REDIRECT_TO && p !== '/info') {
+    res.writeHead(301, { Location: REDIRECT_TO + req.url, 'Cache-Control': 'no-store' });
+    return res.end();
+  }
 
   try {
     // páginas
