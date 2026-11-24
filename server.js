@@ -205,6 +205,7 @@ function send(room, id, msg) {
 function broadcast(room, msg) {
   for (const id of room.members.keys()) send(room, id, msg);
 }
+const activeByUid = new Map(); // conta do Discord -> janela que está numa sala agora
 function pushMembers(room) {
   const members = [...room.members.values()].map((m) => ({ id: m.id, name: m.name, avatar: m.avatar, sharing: m.sharing }));
   broadcast(room, { type: 'members', members, hostId: room.hostId });
@@ -377,6 +378,10 @@ const server = http.createServer(async (req, res) => {
       if (!room) return fail('Essa sala não existe mais. Crie uma nova ou confira o código.');
       if (room.members.size >= MAX_MEMBERS) return fail('A sala está cheia.');
 
+      // uma janela por conta: se a mesma pessoa abrir outra janela/aparelho, a anterior sai
+      const prev = activeByUid.get(user.uid);
+      if (prev) prev.kick();
+
       const id = crypto.randomUUID();
       const name = user.name; // nome vem do Discord (não dá para se passar por outra pessoa)
       room.members.set(id, { id, name, avatar: user.avatar || null, res, sharing: false });
@@ -386,7 +391,20 @@ const server = http.createServer(async (req, res) => {
       log(`${name} entrou na sala ${room.code} (${room.members.size})`);
       const ping = setInterval(() => res.write(': ping\n\n'), 15000);
 
-      req.on('close', () => {
+      let gone = false;
+      const conn = {
+        kick() {
+          res.write(`data: ${JSON.stringify({ type: 'error', reason: 'Você abriu o KOMAND Live em outra janela ou aparelho. Só dá para estar em um lugar por vez — para continuar aqui, entre na sala de novo.' })}\n\n`);
+          res.end();
+          leave();
+        },
+      };
+      activeByUid.set(user.uid, conn);
+
+      const leave = () => {
+        if (gone) return;
+        gone = true;
+        if (activeByUid.get(user.uid) === conn) activeByUid.delete(user.uid);
         clearInterval(ping);
         const me = room.members.get(id);
         room.members.delete(id);
@@ -396,7 +414,9 @@ const server = http.createServer(async (req, res) => {
         if (!room.members.size) room.emptySince = Date.now();
         pushMembers(room);
         log(`${name} saiu da sala ${room.code} (${room.members.size})`);
-      });
+      };
+      req.on('close', leave);
+      res.on('close', leave);
       return;
     }
 
