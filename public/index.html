@@ -33,6 +33,7 @@
   <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></symbol>
   <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
   <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></symbol>
+  <symbol id="i-login" viewBox="0 0 24 24"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><path d="m10 17 5-5-5-5M15 12H3"/></symbol>
   <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></symbol>
 </svg>
 
@@ -65,19 +66,29 @@
 
   <section class="card join">
     <h2>Entrar</h2>
-    <p class="mut">Escolha um apelido para aparecer na sala.</p>
-    <div id="inviteNote" class="invite-note hide"></div>
-    <div class="field-label">Apelido <span id="nickCount">0/24</span></div>
-    <div class="nick-row">
-      <span id="nickAvatar" class="avatar lg" style="background:#3A3633;color:#9A928A">?</span>
-      <input id="nick" class="input" maxlength="24" placeholder="Como vão te chamar" autocomplete="nickname">
+    <div id="inviteNote" class="invite-note hide" style="margin-top:12px"></div>
+    <p id="loadingBox" class="mut">Carregando…</p>
+
+    <!-- ainda não entrou: login com Discord -->
+    <div id="loginBox" class="hide">
+      <p class="mut">O KOMAND Live é exclusivo para quem tem o cargo <b>KOMAND Live</b> no servidor do Discord.</p>
+      <a id="discordBtn" class="btn primary wide" href="/auth/discord"><svg><use href="#i-login"/></svg>Entrar com Discord</a>
+      <p class="hint" style="margin:12px 0 0">Sem senha: o Discord só confirma seu nome e se você tem o cargo.</p>
     </div>
-    <button id="createBtn" class="btn primary wide"><svg><use href="#i-plus"/></svg>Criar sala</button>
-    <div class="or">ou</div>
-    <div class="field-label">Código da sala</div>
-    <div class="code-row">
-      <input id="codeInput" class="input" maxlength="9" placeholder="XXXX-XXXX" autocomplete="off" spellcheck="false">
-      <button id="joinBtn" class="btn">Entrar <svg><use href="#i-arrow"/></svg></button>
+
+    <!-- já entrou: criar sala ou entrar por código -->
+    <div id="sessionBox" class="hide">
+      <div class="me-row">
+        <span id="meAvatar"></span>
+        <div><div id="meNameLanding" class="me-name"></div><a href="/auth/logout" class="link-mut">Sair</a></div>
+      </div>
+      <button id="createBtn" class="btn primary wide"><svg><use href="#i-plus"/></svg>Criar sala</button>
+      <div class="or">ou</div>
+      <div class="field-label">Código da sala</div>
+      <div class="code-row">
+        <input id="codeInput" class="input" maxlength="9" placeholder="XXXX-XXXX" autocomplete="off" spellcheck="false">
+        <button id="joinBtn" class="btn">Entrar <svg><use href="#i-arrow"/></svg></button>
+      </div>
     </div>
     <p id="landingError" class="error hide"></p>
   </section>
@@ -180,9 +191,14 @@ const COLORS = ['#FF6A1A', '#FFB547', '#F4EFE9', '#FF8F6B', '#E6C79C', '#FFD08A'
 // ---------- utilidades ----------
 function colorFor(s) { let h = 0; for (const c of s) h = (h * 31 + c.charCodeAt(0)) >>> 0; return COLORS[h % COLORS.length]; }
 function initials(n) { const p = n.trim().split(/\s+/); return ((p[0]?.[0] || '?') + (p[1]?.[0] || p[0]?.[1] || '')).toUpperCase(); }
-function avatar(name, dot) {
+function avatar(name, dot, url, large) {
   const a = document.createElement('span');
-  a.className = 'avatar'; a.style.background = colorFor(name); a.textContent = initials(name);
+  a.className = 'avatar' + (large ? ' lg' : ''); a.style.background = colorFor(name); a.textContent = initials(name);
+  if (url) { // foto do Discord
+    const im = document.createElement('img'); im.src = url; im.alt = ''; im.referrerPolicy = 'no-referrer';
+    im.onerror = () => im.remove();
+    a.append(im);
+  }
   if (dot) { const d = document.createElement('i'); d.className = 'dot' + (dot === 'live' ? ' live' : ''); a.append(d); }
   return a;
 }
@@ -225,38 +241,59 @@ const outPeers = new Map();                // quem me assiste: id -> { pc, pendi
 // ENTRADA
 // =====================================================================
 const invited = normCode((location.pathname.match(/^\/sala\/([A-Za-z0-9-]+)/) || [])[1] || new URLSearchParams(location.search).get('sala'));
-try { $('nick').value = localStorage.getItem('komand-nick') || ''; } catch {}
-function updateNick() {
-  const n = $('nick').value;
-  $('nickCount').textContent = `${n.length}/24`;
-  const a = $('nickAvatar');
-  if (n.trim()) { a.textContent = initials(n); a.style.background = colorFor(n.trim()); a.style.color = '#160A02'; }
-  else { a.textContent = '?'; a.style.background = '#3A3633'; a.style.color = '#9A928A'; }
+// ---------- login com Discord ----------
+let meInfo = null; // { name, avatar } de quem entrou
+const LOGIN_ERRORS = {
+  'fora-do-servidor': 'Você não está no servidor do Discord da KOMAND. Entre no servidor e tente de novo.',
+  'sem-cargo': 'Você está no servidor, mas ainda não tem o cargo KOMAND Live. Peça para um administrador liberar.',
+  'cancelado': 'Login cancelado.',
+  'nao-configurado': 'O login com Discord ainda não foi configurado.',
+  'expirou': 'Seu login expirou. Entre com o Discord de novo.',
+  'falhou': 'Não deu para entrar com o Discord. Tente de novo.',
+};
+const loginErr = new URLSearchParams(location.search).get('erro');
+if (loginErr) history.replaceState(null, '', location.pathname);
+function renderLanding() {
+  $('loadingBox').classList.add('hide');
+  $('loginBox').classList.toggle('hide', !!meInfo);
+  $('sessionBox').classList.toggle('hide', !meInfo);
+  if (meInfo) {
+    $('meAvatar').replaceChildren(avatar(meInfo.name, null, meInfo.avatar, true));
+    $('meNameLanding').textContent = meInfo.name;
+  }
+  $('discordBtn').href = '/auth/discord?next=' + encodeURIComponent(invited ? '/sala/' + invited : '/');
+  if (invited) {
+    $('codeInput').value = invited;
+    $('inviteNote').textContent = meInfo
+      ? `Você foi convidado para a sala ${invited}. Clique em Entrar.`
+      : `Você foi convidado para a sala ${invited}. Entre com o Discord para participar.`;
+    $('inviteNote').classList.remove('hide');
+  }
 }
-$('nick').addEventListener('input', updateNick);
-updateNick();
-if (invited) {
-  $('codeInput').value = invited;
-  $('inviteNote').textContent = `Você foi convidado para a sala ${invited}. Escolha um apelido e clique em Entrar.`;
-  $('inviteNote').classList.remove('hide');
+async function loadSession() {
+  try { const r = await fetch('/api/me', { cache: 'no-store' }); meInfo = r.ok ? await r.json() : null; }
+  catch { meInfo = null; }
+  renderLanding();
 }
+loadSession();
+if (loginErr) landingError(LOGIN_ERRORS[loginErr] || LOGIN_ERRORS.falhou);
 $('codeInput').addEventListener('input', (e) => {
   const s = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
   e.target.value = s.length > 4 ? s.slice(0, 4) + '-' + s.slice(4) : s;
 });
 function landingError(msg) { $('landingError').textContent = msg || ''; $('landingError').classList.toggle('hide', !msg); }
 function getNick() {
-  const n = $('nick').value.trim();
-  if (!n) { landingError('Escolha um apelido primeiro.'); $('nick').focus(); return null; }
-  try { localStorage.setItem('komand-nick', n); } catch {}
-  return n;
+  if (!meInfo) { landingError('Entre com o Discord primeiro.'); return null; }
+  return meInfo.name;
 }
+function sessionLost() { meInfo = null; renderLanding(); landingError(LOGIN_ERRORS.expirou); }
 $('createBtn').onclick = async () => {
   landingError('');
   const n = getNick(); if (!n) return;
   $('createBtn').disabled = true;
   try {
     const r = await fetch('/api/rooms', { method: 'POST' });
+    if (r.status === 401) return sessionLost();
     const j = await r.json();
     if (!r.ok) throw new Error(j.error);
     enterRoom(j.code, n);
@@ -271,12 +308,12 @@ $('joinBtn').onclick = async () => {
   $('joinBtn').disabled = true;
   try {
     const r = await fetch('/api/rooms/' + code);
+    if (r.status === 401) return sessionLost();
     if (r.status === 404) return landingError('Não achei essa sala. Confira o código ou crie uma nova.');
     enterRoom(code, n);
   } catch { landingError('Sem conexão com o servidor. Tente de novo.'); }
   finally { $('joinBtn').disabled = false; }
 };
-$('nick').addEventListener('keydown', (e) => { if (e.key === 'Enter') (invited ? $('joinBtn') : $('createBtn')).click(); });
 $('codeInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('joinBtn').click(); });
 
 // ---------- emblema K/TV: acompanha o mouse com inclinação 3D e brilho ----------
@@ -378,6 +415,7 @@ function onMessage(m) {
   switch (m.type) {
     case 'error':
       leaveRoom(m.reason);
+      if (m.login) loadSession(); // acesso expirou ou o cargo foi removido: volta para o "Entrar com Discord"
       break;
     case 'hello': {
       const reconnect = !!me.id;
@@ -411,7 +449,7 @@ function onMessage(m) {
 function personItem(p, clickable) {
   const li = document.createElement('li');
   li.className = 'person' + (clickable ? ' clickable' : '') + (p.id === watching ? ' active' : '');
-  li.append(avatar(p.name, p.sharing ? 'live' : 'on'));
+  li.append(avatar(p.name, p.sharing ? 'live' : 'on', p.avatar));
   const info = document.createElement('div'); info.className = 'info';
   const nm = document.createElement('div'); nm.className = 'name';
   nm.append(document.createTextNode(p.name));

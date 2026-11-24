@@ -37,6 +37,7 @@ svg { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor; s
   padding: 11px 18px; border-radius: 10px; cursor: pointer; font-weight: 600;
   background: var(--panel-2); color: var(--ink); border: 1.5px solid var(--line-2);
   box-shadow: 3px 3px 0 var(--sombra); transition: transform .08s, box-shadow .08s, background .15s;
+  text-decoration: none;
 }
 .btn:hover { background: #2E2E2E; }
 .btn:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 var(--sombra); }
@@ -147,6 +148,11 @@ svg { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor; s
   font-family: var(--f-titulo); font-weight: 700; font-size: 14px; color: #160A02; border: 1.5px solid rgba(0,0,0,.6);
 }
 .avatar.lg { width: 46px; height: 46px; font-size: 16px; }
+.avatar img { position: absolute; inset: 0; width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }
+.me-row { display: flex; align-items: center; gap: 12px; margin: 14px 0 18px; }
+.me-name { font-family: var(--f-titulo); font-weight: 600; font-size: 17px; }
+.link-mut { color: var(--mut); font-size: 13px; }
+.link-mut:hover { color: var(--laranja-claro); }
 .avatar .dot { position: absolute; right: -2px; bottom: -2px; width: 12px; height: 12px; border-radius: 50%; background: var(--ok); border: 2px solid var(--panel); }
 .avatar .dot.live { background: var(--laranja); }
 
