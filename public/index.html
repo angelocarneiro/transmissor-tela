@@ -518,7 +518,17 @@ $('hidePreview').onclick = () => { selfPreview = false; showSelfStage(); };
 function setNameTag(text) {
   $('nameTag').classList.toggle('hide', !text);
   $('nameTag').querySelector('span').textContent = text || '';
+  flashTags();
 }
+// o nome e os avisos em cima do vídeo somem depois de 4 s; voltam ao tocar/mexer o mouse na tela
+let tagTimer = null;
+function flashTags() {
+  $('stage').classList.remove('tags-off');
+  clearTimeout(tagTimer);
+  tagTimer = setTimeout(() => $('stage').classList.add('tags-off'), 4000);
+}
+$('stage').addEventListener('pointerdown', flashTags);
+$('stage').addEventListener('pointermove', (e) => { if (e.pointerType === 'mouse') flashTags(); });
 
 // escolhe automaticamente alguém para assistir quando não estou vendo ninguém
 function autoWatch() {
